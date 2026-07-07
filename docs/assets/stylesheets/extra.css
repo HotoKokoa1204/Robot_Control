@@ -1,0 +1,23 @@
+/* --- Professional Logo Visibility Optimization --- */
+
+/* Desktop: Significantly enlarge the logo */
+.md-logo img {
+    height: 4.5rem !important; /* Force a much larger size */
+    width: auto;
+    max-height: none !important; /* Remove Material default constraints */
+    margin: -0.5rem 0; /* Adjust vertical alignment if it's too high */
+}
+
+/* Ensure the header container doesn't clip the larger logo */
+.md-header__button.md-logo {
+    padding: 0;
+    margin-right: 1.5rem;
+}
+
+/* Mobile & Tablet: Maintain a sensible but visible size */
+@media screen and (max-width: 76.25em) {
+    .md-logo img {
+        height: 2.2rem !important;
+        margin: 0;
+    }
+}

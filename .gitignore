@@ -1,0 +1,66 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+#Ros 2
+build/
+build/
+log/
+
+# test
+*.db3
+*.log
+
+
+# Distribution / packaging
+.Python
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Data
+# Ignore everything in data except .gitkeep files to maintain directory structure
+data/*
+!data/**/.gitkeep
+!data/.gitkeep
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tools
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
