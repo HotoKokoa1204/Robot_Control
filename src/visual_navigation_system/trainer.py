@@ -117,7 +117,10 @@ class Trainer:
                 pbar.update(1)
                 # 更新進度條右側顯示的當前 Epoch 與 Loss 數值
                 pbar.set_postfix(
-                    {"Epoch": f"{epoch+1}/{num_epochs}", "Loss": f"{loss_f_total:.4f}"}
+                    {
+                        "Epoch": f"{epoch + 1}/{num_epochs}",
+                        "Loss": f"{loss_f_total:.4f}",
+                    }
                 )
 
             # 紀錄該 Epoch 的總損失
@@ -201,7 +204,7 @@ class LSTMTrainer:
                 n_train += bs
 
                 pbar.update(1)
-                pbar.set_postfix({"Epoch": f"{epoch+1}/{num_epochs}"})
+                pbar.set_postfix({"Epoch": f"{epoch + 1}/{num_epochs}"})
 
             epoch_train_loss = sum_train_loss / n_train
 

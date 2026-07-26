@@ -98,7 +98,7 @@ def process_npy(
         restored_frame_bgr = cv2.cvtColor(restored_frame, cv2.COLOR_RGB2BGR)
         out.write(restored_frame_bgr)
 
-        print(f"處理中：{idx+1 + buffer}/{features.shape[0] + buffer} 幀", end="\r")
+        print(f"處理中：{idx + 1 + buffer}/{features.shape[0] + buffer} 幀", end="\r")
 
     out.release()
     print(f"\n影片已儲存至：{output_path}")

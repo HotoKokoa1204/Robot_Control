@@ -49,7 +49,7 @@ def main():
     threshold = error_percent * best_act_total
     print(
         f"最佳影片總幀數(去旋轉): {best_act_total},\
-            允許誤差幀數(+-{error_percent*100}%): {threshold:.2f}"
+            允許誤差幀數(+-{error_percent * 100}%): {threshold:.2f}"
     )
 
     # ---------- 2. 地圖繪圖設定 ----------
@@ -280,7 +280,7 @@ def main():
                 if final_raw_db_pred is not None
                 else "序列未滿"
             )
-            print(f"frame {idx+1}/{total_in} | {pred_str}", end="\r")
+            print(f"frame {idx + 1}/{total_in} | {pred_str}", end="\r")
 
     cap.release()
     final_accuracy = (
@@ -400,7 +400,7 @@ def main():
             y0 += txt_h + pad
 
         # 幀數
-        frame_text = f"Frame: {idx+1} / {total_in}"
+        frame_text = f"Frame: {idx + 1} / {total_in}"
         cv2.putText(
             canvas,
             frame_text,
@@ -435,7 +435,7 @@ def main():
         )
 
         writer.write(canvas)
-        print(f"正在寫入地圖影片... 預測結果幀數 {idx+1}", end="\r")
+        print(f"正在寫入地圖影片... 預測結果幀數 {idx + 1}", end="\r")
 
     writer.release()
 

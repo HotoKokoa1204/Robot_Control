@@ -3,6 +3,7 @@ import os
 import sys
 
 import yaml
+
 from visual_navigation_system.graph_builder import GraphBuilder
 from visual_navigation_system.visualizer import GraphVisualizer
 

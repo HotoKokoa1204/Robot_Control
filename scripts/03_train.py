@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import yaml
+
 from visual_navigation_system.dataset import get_dataloader
 from visual_navigation_system.models import AutoEncoder
 from visual_navigation_system.trainer import Trainer
