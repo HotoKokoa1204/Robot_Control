@@ -275,12 +275,12 @@ def main():
                         }
                     )
 
-            print(
-                f"frame {idx+1}/{total_in}\
-                    | {f'預測 {final_raw_db_pred}' if final_raw_db_pred is not\
-                        None else '序列未滿'}",
-                end="\r",
+            pred_str = (
+                f"預測 {final_raw_db_pred}"
+                if final_raw_db_pred is not None
+                else "序列未滿"
             )
+            print(f"frame {idx+1}/{total_in} | {pred_str}", end="\r")
 
     cap.release()
     final_accuracy = (
