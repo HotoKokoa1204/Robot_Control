@@ -40,6 +40,13 @@ MANIFEST
 data/*
 !data/**/.gitkeep
 !data/.gitkeep
+Database/
+Map/
+model/
+*.mp4
+*.pt
+*.npy
+*.pth
 
 # Jupyter Notebook
 .ipynb_checkpoints
