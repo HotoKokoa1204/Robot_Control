@@ -67,7 +67,7 @@
 │   ├── 需手動處理的步驟.md    # 標註需人工介入設定的完整指南
 │   └── 最佳影片的節點數推導過程.txt # 詳細描述虛擬地圖節點數之數學推導與線性內插邏輯
 ├── src/
-│   └── Visual_Navigation_System/
+│   └── visual_navigation_system/
 │       ├── dataset.py       # 資料集建構 (包含 SegmentAligner 幀數對齊機制)
 │       ├── evaluator.py     # 特徵提取器 (FeatureExtractor 特徵抽取)
 │       ├── graph_builder.py # PyTorch Geometric 圖資料結構建立器
@@ -181,10 +181,10 @@
     - 計算每個路徑應有的 Node 數（詳見 `docs/最佳影片的節點數推導過程.txt`）。
     - 將最佳影片實際 frame 數，平均下取樣或線性內插至該有的 frame 數：
 
-        \>執行：`python scripts/11_adjust_best_video_length.py --frames <目標數字>`
+        \> 執行：`python scripts/11_adjust_best_video_length.py --frames <目標數字>`
 
 - **3-6. 建立全局特徵庫**：若沒有全路徑影片，串接所有路徑的 Best_Video 作為基本的 Graph 算準確率。
-\> 執行：`python scripts/12_concat_best_videos.py`
+> 執行：`python scripts/12_concat_best_videos.py`
 - **3-7. 人工微調**：判斷是否需要微調串接結果。
 
 ### 4. 定位模型之 LSTM 訓練與預測評估
@@ -197,7 +197,7 @@
 \> 執行：`python scripts/01_preprocess_videos.py`
 - **4-2. 紀錄路徑資訊**：將測試影片的每個路徑的 frame 數、總 frame 數，手動紀錄至：`Map\Full Path Test Video\Full_Path_TestVideo_information.txt`。
 - **4-3. 執行貪婪法比對**：將要測試的全路徑影片，用貪婪法比對最佳影片 `.npy` 檔，選出最相似的特徵作為預測，並將預測結果畫出來，此準確率將作為後續的 Baseline。
-\> 執行：`python scripts/13_greedy_prediction.py`
+> 執行：`python scripts/13_greedy_prediction.py`
     - **【貪婪法定位與繪圖原理詳解】**：
         1. **路徑點標註**：輸入的測試影片必須手動標註哪些 frame 是「切換路徑」的節點（紀錄於 `Map\Full Path Test Video\Full_Path_TestVideo_information.txt` 中）。
         2. **路徑特徵映射**：使用映射函數，將「輸入測試影片」與「最佳影片」中的「轉彎路徑」皆視為 1 個獨立的點。
