@@ -8,7 +8,6 @@ import torch
 import torch.optim as optim
 import yaml
 from torch.utils.data import DataLoader, random_split
-
 from visual_navigation_system.dataset import AlignedSequenceDataset
 from visual_navigation_system.lstm_model import LocationLSTM
 from visual_navigation_system.trainer import LSTMTrainer
@@ -53,7 +52,7 @@ def main():
         data_dir=data_dir,
         info_dir=info_dir,
         ref_info_path=best_info_path,
-        Best_video_tensor=best_features_path,
+        best_video_tensor=best_features_path,
         seq_length=sequence_length,
     )
 

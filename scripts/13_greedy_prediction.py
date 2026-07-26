@@ -140,8 +140,8 @@ def main():
     fps = cap.get(cv2.CAP_PROP_FPS)
 
     out_video = cfg.get("output_video_path", "Map.mp4")
-    fourcc = cv2.Videowriter_fourcc(*"mp4v")
-    writer = cv2.Videowriter(out_video, fourcc, fps, (w, h))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(out_video, fourcc, fps, (w, h))
 
     results_data = []
     correct = 0

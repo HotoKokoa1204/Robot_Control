@@ -294,8 +294,8 @@ def main():
 
     # ---------- 5. 第二階段：繪製地圖動畫 ----------
     out_video = cfg.get("output_video_path", "Map_LSTM.mp4")
-    fourcc = cv2.Videowriter_fourcc(*"mp4v")
-    writer = cv2.Videowriter(out_video, fourcc, fps, (w, h))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(out_video, fourcc, fps, (w, h))
 
     font, fs, th = cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
 
