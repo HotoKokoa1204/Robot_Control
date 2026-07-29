@@ -1,4 +1,4 @@
-# 用於 scripts/01_preprocess_videos.py, 將資料集調整成 192*108、10Hz 的影片
+# 用於 scripts/tku/visual_navigation_system/01_preprocess_videos.py, 將資料集調整成 192*108、10Hz 的影片
 video:
   # 原始影片前處理 (縮放與降取樣) 的輸入與輸出資料夾
   raw_video_dir: "Database/video/Original"
@@ -10,7 +10,7 @@ video:
   # 降取樣目標 FPS
   target_fps: 10
 
-# 用於 scripts/02_prepare_dataset.py，將資料集逐一包裝成.pt，再逐條路徑隨機抽取特定數量的.pt，包裝成訓練集
+# 用於 scripts/tku/visual_navigation_system/02_prepare_dataset.py，將資料集逐一包裝成.pt，再逐條路徑隨機抽取特定數量的.pt，包裝成訓練集
 dataset_preparation:
   # 已降取樣好的影片根目錄
   input_dir: "Database/video/resized_downsampling_videos"
@@ -22,7 +22,7 @@ dataset_preparation:
   output_info_path: "Database/Data/All_Path_tensor_info.txt" # 存取所有 .pt檔資訊的 txt 檔
   output_frame_count_path: "Database/Data/All_Path_video400_10Hz.txt" # 存放各抽取影片的 frame 數
 
-# 用於 scripts/03_train.py，調整訓練 AutoEncoder 的參數
+# 用於 scripts/tku/visual_navigation_system/03_train.py，調整訓練 AutoEncoder 的參數
 training:
   num_epochs: 300
   learning_rate: 0.00005  # 5e-5
@@ -38,7 +38,7 @@ training:
 
 
 
-# 用於 scripts/04_inference.py，使用 AutoEncoder 編碼及還原影像
+# 用於 scripts/tku/visual_navigation_system/04_inference.py，使用 AutoEncoder 編碼及還原影像
 inference:
   # AutoEncoder 測試與推論相關路徑
   autoencoder_weights: "model/Node_Encoder_Model/7_11/7_11_150.pth"
@@ -54,7 +54,7 @@ inference:
 
 
 
-# 用於 scripts/07_uniform_downsample.py 平均下取樣
+# 用於 scripts/tku/visual_navigation_system/07_uniform_downsample.py 平均下取樣
 uniform_downsampling:
   # 來源影片根目錄 (例如從 01_preprocess_videos.py 處理完的降取樣影片)
   input_base_dir: "Database/video/Preprocessed_resize_downsampling_videos"
@@ -67,7 +67,7 @@ uniform_downsampling:
 
 
 
-# 用於 scripts/08_extract_features.py，將影片經過 Encoder 編碼成特徵向量再儲存成.npy檔
+# 用於 scripts/tku/visual_navigation_system/08_extract_features.py，將影片經過 Encoder 編碼成特徵向量再儲存成.npy檔
 extract_features:
   encoder_weights_path: "model/Node_Encoder_Model/7_11/7_11_150.pth"
   input_base_dir: "Database/video/Uniform_downsampling_video"
@@ -80,7 +80,7 @@ extract_features:
 
 
 
-# 用於 scripts/09_make_best_video.py，製作最佳影片
+# 用於 scripts/tku/visual_navigation_system/09_make_best_video.py，製作最佳影片
 make_best_video:
   # 取前 X 部影片來訓練最佳影片 (其餘視為測試集)
   max_videos: 7
@@ -98,7 +98,7 @@ make_best_video:
 
 
 
-# 用於 scripts/11_adjust_best_video_length.py，將"直線"路徑的 frame 數縮放至指定的 frame 數
+# 用於 scripts/tku/visual_navigation_system/11_adjust_best_video_length.py，將"直線"路徑的 frame 數縮放至指定的 frame 數
 adjust_best_video_length:
   input_mp4_path: "Map/Best_Video/Best_Video/直線C/直線C_逆向.mp4"
   input_npy_path: "Map/Best_Video/Best_Video_Features/直線C/直線C_逆向.npy"
@@ -108,7 +108,7 @@ adjust_best_video_length:
 
 
 
-# 用於 scripts/12_concat_best_videos.py，將各個路徑的 Best_Video 串接
+# 用於 scripts/tku/visual_navigation_system/12_concat_best_videos.py，將各個路徑的 Best_Video 串接
 concat_best_videos:
   # 輸入目錄 (各個 Best Video 所在的根目錄)
   input_video_base_dir: "Map/Best_Video/Best_Video"
@@ -125,7 +125,7 @@ concat_best_videos:
 
 
 
-# 用於 scripts/13_greedy_prediction.py，貪婪演算法計算準確率
+# 用於 scripts/tku/visual_navigation_system/13_greedy_prediction.py，貪婪演算法計算準確率
 greedy_prediction:
   # AutoEncoder 模型權重與最佳影片特徵編碼路徑
   model_path: "model/Node_Encoder_Model/7_11/7_11_150.pth"
@@ -172,7 +172,7 @@ greedy_prediction:
 
 
 
-# 用於 scripts/14_train_lstm.py, scripts/15_lstm_prediction.py，訓練 LSTM、測試 LSTM 的預測準確率
+# 用於 scripts/tku/visual_navigation_system/14_train_lstm.py, scripts/15_lstm_prediction.py，訓練 LSTM、測試 LSTM 的預測準確率
 lstm:
   device: "cuda:0"
   sequence_length: 9 # 輸入前 X 個特徵向量來預測下一個特徵向量
@@ -247,7 +247,7 @@ lstm:
 
 
 
-# 用於 scripts/16_visualize_graph.py, scripts/17_shortest_path.py，手動建立各個不同路段最佳影片之間銜接的 frame 作為跨影片的邊。
+# 用於 scripts/tku/visual_navigation_system/16_visualize_graph.py, scripts/17_shortest_path.py，手動建立各個不同路段最佳影片之間銜接的 frame 作為跨影片的邊。
 graph:
   # PyGraphviz/pydot layout engine (sfdp, fdp, dot)
   layout_prog: 'sfdp'
