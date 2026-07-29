@@ -19,7 +19,7 @@ dependencies:
   # PyTorch & CUDA (Adjust versions based on your local GPU drivers)
   # - pytorch=2.13.0
   # - torchvision=0.28.0
-  # - torchaudio
+  # - torchaudio==2.11.0+cu130
   # - pytorch-cuda=13.0
   # coding style
 
@@ -36,7 +36,7 @@ dependencies:
     - --extra-index-url https://download.pytorch.org/whl/cu130
     - torch==2.13.0
     - torchvision==0.28.0
-    - torchaudio
+    - torchaudio==2.11.0+cu130
     # Installs the local package in editable mode (required)
     - -e .[dev]
     # Examples of common AI/research packages:
