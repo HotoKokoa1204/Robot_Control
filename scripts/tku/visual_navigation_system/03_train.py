@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import yaml
+
 from agilab.tku.visual_navigation_system.dataset import get_dataloader
 from agilab.tku.visual_navigation_system.models import AutoEncoder
 from agilab.tku.visual_navigation_system.trainer import Trainer

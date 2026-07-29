@@ -3,6 +3,7 @@ import os
 import sys
 
 import yaml
+
 from agilab.tku.visual_navigation_system.graph_builder import GraphBuilder
 from agilab.tku.visual_navigation_system.visualizer import GraphVisualizer
 

@@ -7,10 +7,11 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import yaml
+from torch.utils.data import DataLoader, random_split
+
 from agilab.tku.visual_navigation_system.dataset import AlignedSequenceDataset
 from agilab.tku.visual_navigation_system.lstm_model import LocationLSTM
 from agilab.tku.visual_navigation_system.trainer import LSTMTrainer
-from torch.utils.data import DataLoader, random_split
 
 # 解決 OpenMP 多重載入的問題
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
