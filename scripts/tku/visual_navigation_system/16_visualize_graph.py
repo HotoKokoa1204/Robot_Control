@@ -3,18 +3,19 @@ import os
 import sys
 
 import yaml
-
-from visual_navigation_system.graph_builder import GraphBuilder
-from visual_navigation_system.visualizer import GraphVisualizer
+from agilab.tku.visual_navigation_system.graph_builder import GraphBuilder
+from agilab.tku.visual_navigation_system.visualizer import GraphVisualizer
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+)
 
 
 def load_config():
     config_path = os.path.join(
-        os.path.dirname(__file__), "..", "configs", "config.yaml"
+        os.path.dirname(__file__), "..", "..", "..", "configs", "config.yaml"
     )
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)

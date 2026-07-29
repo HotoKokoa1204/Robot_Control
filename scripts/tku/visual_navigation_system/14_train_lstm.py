@@ -7,23 +7,24 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import yaml
+from agilab.tku.visual_navigation_system.dataset import AlignedSequenceDataset
+from agilab.tku.visual_navigation_system.lstm_model import LocationLSTM
+from agilab.tku.visual_navigation_system.trainer import LSTMTrainer
 from torch.utils.data import DataLoader, random_split
-
-from visual_navigation_system.dataset import AlignedSequenceDataset
-from visual_navigation_system.lstm_model import LocationLSTM
-from visual_navigation_system.trainer import LSTMTrainer
 
 # 解決 OpenMP 多重載入的問題
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 matplotlib.use("Agg")  # 解決 QThreadStorage 警告 (不需要互動式 GUI，只存檔)
 # 確保可正確載入 core 目錄下的模組
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+)
 
 
 def main():
     # 讀取設定檔
     config_path = os.path.join(
-        os.path.dirname(__file__), "..", "configs", "config.yaml"
+        os.path.dirname(__file__), "..", "..", "..", "configs", "config.yaml"
     )
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)

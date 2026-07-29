@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import torch
 
-from visual_navigation_system.models import Encoder
+from agilab.tku.visual_navigation_system.models import Encoder
 
 
 class FeatureExtractor:

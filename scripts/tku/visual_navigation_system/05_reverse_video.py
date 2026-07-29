@@ -3,8 +3,10 @@ import os
 import sys
 
 # 確保可正確載入 core 目錄下的模組
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from visual_navigation_system.video_utils import reverse_video
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+)
+from agilab.tku.visual_navigation_system.video_utils import reverse_video
 
 
 def main():

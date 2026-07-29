@@ -6,14 +6,16 @@ import torch
 import yaml
 
 # 確保可正確載入 core 目錄下的模組
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from visual_navigation_system.video_utils import video_to_tensor
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+)
+from agilab.tku.visual_navigation_system.video_utils import video_to_tensor
 
 
 def main():
     # 1. 載入設定檔
     config_path = os.path.join(
-        os.path.dirname(__file__), "..", "configs", "config.yaml"
+        os.path.dirname(__file__), "..", "..", "..", "configs", "config.yaml"
     )
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)

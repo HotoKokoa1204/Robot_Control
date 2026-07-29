@@ -5,21 +5,22 @@ import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import yaml
-
-from visual_navigation_system.dataset import get_dataloader
-from visual_navigation_system.models import AutoEncoder
-from visual_navigation_system.trainer import Trainer
+from agilab.tku.visual_navigation_system.dataset import get_dataloader
+from agilab.tku.visual_navigation_system.models import AutoEncoder
+from agilab.tku.visual_navigation_system.trainer import Trainer
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # 確保可正確載入 core 目錄下的模組
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+)
 
 
 def main():
     # 讀取設定檔
     config_path = os.path.join(
-        os.path.dirname(__file__), "..", "configs", "config.yaml"
+        os.path.dirname(__file__), "..", "..", "..", "configs", "config.yaml"
     )
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)

@@ -8,15 +8,20 @@ import torch
 import yaml
 
 # 確保可正確載入 core 目錄下的模組
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
-from visual_navigation_system.lstm_model import LocationLSTM
-from visual_navigation_system.models import AutoEncoder
-from visual_navigation_system.predictor import load_segment_info, map_to_actual_idx
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
+)
+from agilab.tku.visual_navigation_system.lstm_model import LocationLSTM
+from agilab.tku.visual_navigation_system.models import AutoEncoder
+from agilab.tku.visual_navigation_system.predictor import (
+    load_segment_info,
+    map_to_actual_idx,
+)
 
 
 def main():
     config_path = os.path.join(
-        os.path.dirname(__file__), "..", "configs", "config.yaml"
+        os.path.dirname(__file__), "..", "..", "..", "configs", "config.yaml"
     )
     if not os.path.exists(config_path):
         print(f"找不到設定檔: {config_path}")
