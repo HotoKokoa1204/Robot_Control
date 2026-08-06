@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "project_name"
+name = "Visual_Navigation_System"
 version = "0.1.0"
-description = "AGILAB Research Software Template"
+description = "This is an indoor positioning system developed with PyTorch that converts video visual features into spatial coordinates and graph-theory trajectories."
 authors = [
     {name = "AGILAB NTNU", email = "mjhsu@ntnu.edu.tw"}
 ]

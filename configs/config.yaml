@@ -1,0 +1,318 @@
+# 用於 scripts/tku/visual_navigation_system/01_preprocess_videos.py, 將資料集調整成 192*108、10Hz 的影片
+video:
+  # 原始影片前處理 (縮放與降取樣) 的輸入與輸出資料夾
+  raw_video_dir: "Database/video/Original"
+  processed_video_dir: "Database/video/resized_downsampling_videos"
+
+  # 影片縮放大小
+  new_width: 192
+  new_height: 108
+  # 降取樣目標 FPS
+  target_fps: 10
+
+# 用於 scripts/tku/visual_navigation_system/02_prepare_dataset.py，將資料集逐一包裝成.pt，再逐條路徑隨機抽取特定數量的.pt，包裝成訓練集
+dataset_preparation:
+  # 已降取樣好的影片根目錄
+  input_dir: "Database/video/resized_downsampling_videos"
+  # 直線路徑與旋轉路徑的抽樣數量
+  straight_video_count: 20
+  rotation_video_count: 10
+  # 合併後的 Tensor 輸出檔名與路徑
+  output_tensor_path: "Database/Data/All_Path_400videos_tensor.pt" # 合併後的儲存檔案名稱
+  output_info_path: "Database/Data/All_Path_tensor_info.txt" # 存取所有 .pt檔資訊的 txt 檔
+  output_frame_count_path: "Database/Data/All_Path_video400_10Hz.txt" # 存放各抽取影片的 frame 數
+
+# 用於 scripts/tku/visual_navigation_system/03_train.py，調整訓練 AutoEncoder 的參數
+training:
+  num_epochs: 300
+  learning_rate: 0.00005  # 5e-5
+  batch_size: 128
+  weight_decay: 0.00001   # 1e-5
+  device: "cuda:0"
+
+  # 訓練集路徑
+  data_path: "Database/Data/All_Path_400videos_tensor.pt"
+
+  # 儲存 AutoEncoder 模型權重的資料夾路徑
+  model_folder: "model/Node_Encoder_Model"
+
+
+
+# 用於 scripts/tku/visual_navigation_system/04_inference.py，使用 AutoEncoder 編碼及還原影像
+inference:
+  # AutoEncoder 測試與推論相關路徑
+  autoencoder_weights: "model/Node_Encoder_Model/7_11/7_11_150.pth"
+
+  # 測試 AutoEncoder 的還原效果，可輸入 .mp4 或 .npy (二選一)
+  test_video_input: "Database/video/resized_downsampling_videos/直線H/順向/IMG_180_new.mp4" # 輸入要讓 AutoEncoder 測試還原的.mp4
+  test_npy_input: "Map/prediction/greedy_predicted_features.npy" # 輸入要讓 AutoEncoder 測試還原的.npy
+
+  # 還原後的影片輸出資料夾
+  decoder_output_folder: "Decoder_after_video"
+
+  device: "cuda:0"
+
+
+
+# 用於 scripts/tku/visual_navigation_system/07_uniform_downsample.py 平均下取樣
+uniform_downsampling:
+  # 來源影片根目錄 (例如從 01_preprocess_videos.py 處理完的降取樣影片)
+  input_base_dir: "Database/video/Preprocessed_resize_downsampling_videos"
+  # 輸出平均對齊長度後的影片根目錄
+  output_base_dir: "Database/video/Uniform_downsampling_video"
+
+  # 需要對齊的路徑列表
+  straight_paths: ["A", "B", "C", "D", "E", "F", "G", "H"] # 直線路徑
+  rotation_paths: ["B", "C", "E"] # 旋轉路徑
+
+
+
+# 用於 scripts/tku/visual_navigation_system/08_extract_features.py，將影片經過 Encoder 編碼成特徵向量再儲存成.npy檔
+extract_features:
+  encoder_weights_path: "model/Node_Encoder_Model/7_11/7_11_150.pth"
+  input_base_dir: "Database/video/Uniform_downsampling_video"
+
+  # 要把編碼好的 .npy 特徵存在哪裡
+  output_base_dir: "Database/Encoder_Features"
+
+  straight_paths: ["A", "B", "C", "D", "E", "F", "G", "H"] # 直線路徑
+  rotation_paths: ["B", "C", "E"] # 旋轉路徑
+
+
+
+# 用於 scripts/tku/visual_navigation_system/09_make_best_video.py，製作最佳影片
+make_best_video:
+  # 取前 X 部影片來訓練最佳影片 (其餘視為測試集)
+  max_videos: 7
+
+  # 輸入目錄 (特徵與下取樣影片)
+  input_feature_base_dir: "Database/Encoder_Features"
+  input_video_base_dir: "Database/video/Uniform_downsampling_video"
+
+  # 輸出目錄 (最佳影片與最佳特徵)
+  output_best_video_base_dir: "Map/Best_Video/Best_Video"
+  output_best_feature_base_dir: "Map/Best_Video/Best_Video_Features"
+
+  straight_paths: ["A", "B", "C", "D", "E", "F", "G", "H"] # 直線路徑
+  rotation_paths: ["B", "C", "E"] # 旋轉路徑
+
+
+
+# 用於 scripts/tku/visual_navigation_system/11_adjust_best_video_length.py，將"直線"路徑的 frame 數縮放至指定的 frame 數
+adjust_best_video_length:
+  input_mp4_path: "Map/Best_Video/Best_Video/直線C/直線C_逆向.mp4"
+  input_npy_path: "Map/Best_Video/Best_Video_Features/直線C/直線C_逆向.npy"
+
+  output_mp4_path: "Map/Best_Video/Best_Video/直線C/直線C_逆向.mp4"
+  output_npy_path: "Map/Best_Video/Best_Video_Features/直線C/直線C_逆向.npy"
+
+
+
+# 用於 scripts/tku/visual_navigation_system/12_concat_best_videos.py，將各個路徑的 Best_Video 串接
+concat_best_videos:
+  # 輸入目錄 (各個 Best Video 所在的根目錄)
+  input_video_base_dir: "Map/Best_Video/Best_Video"
+  input_feature_base_dir: "Map/Best_Video/Best_Video_Features"
+
+  # 輸出目錄與檔名 (合併後的影片與特徵)
+  output_dir: "Map/Best_Video/Basic Graph"
+  output_video_name: "Full_Path_Best_Video.mp4"
+  output_feature_name: "Full_Path_Best_Video.npy"
+  output_info_name: "Full_Path_Best_Video_information.txt"
+
+  direction: "順向" # 要串接的影片方向
+  line_names: ["直線A", "旋轉B", "直線B", "旋轉C", "直線C", "旋轉E", "直線D"] # 要串接的路徑名稱
+
+
+
+# 用於 scripts/tku/visual_navigation_system/13_greedy_prediction.py，貪婪演算法計算準確率
+greedy_prediction:
+  # AutoEncoder 模型權重與最佳影片特徵編碼路徑
+  model_path: "model/Node_Encoder_Model/7_11/7_11_150.pth"
+  db_features_path: "Map/Best_Video/Basic Graph/Full_Path_Best_Video.npy"
+
+  # 最佳影片與測試影片
+  best_info_path: "Map/Best_Video/Basic Graph/Full_Path_Best_Video_information.txt"
+  input_info_path: "Map/Full Path Test Video/Full_Path_TestVideo_information.txt"
+  test_video_path: "Map/Full Path Test Video/Full_Path_TestVideo.mp4"
+
+  # 全域誤差百分比 (0.05 代表正負 5%)
+  error_tolerance_percent: 0.05
+
+  # 定位的地圖與貪婪法定位完輸出的繪製影片
+  map_image_path: "Map/map.png"
+  output_video_path: "Map/prediction/greedy_predicted_map.mp4"
+  output_features_path: "Map/prediction/greedy_predicted_features.npy"
+
+  # 測試路線的旋轉點
+  # 格式為 [x, y]
+  map_points:
+    - [1137, 342] # 旋轉點 A
+    - [880, 312]  # 旋轉點 B
+    - [880, 419]  # 旋轉點 C
+    - [651, 439]  # 旋轉點 E
+    - [664, 322]  # 旋轉點 D
+
+# 各個旋轉點座標，供參考：
+# pts = [
+#     (1137, 902-560), # 旋轉點 A
+#     (880, 902-590), # 旋轉點 B
+#     (880, 902-483), # 旋轉點 C
+#     (651, 902-463), # 旋轉點 E
+#     (664, 902-580), # 旋轉點 D
+#     (651, 902-463), # 旋轉點 E
+#     (214, 902-443), # 旋轉點 G
+#     (794, 902-294), # 旋轉點 L
+#     (880, 902-483), # 旋轉點 C
+#     (1639, 902-483) # 旋轉點 K
+#     ]
+
+  # 計算地圖路線方向向量的索引，如： map_points[0] --> map_points[1], map_points[1] --> map_points[1]（位於旋轉點旋轉，等同旋轉點 B 走到旋轉點 B）, map_points[1] --> map_points[2]
+  static_path_indices: [0, 1, 1, 2, 2, 3, 3, 4]
+
+
+
+# 用於 scripts/tku/visual_navigation_system/14_train_lstm.py, scripts/15_lstm_prediction.py，訓練 LSTM、測試 LSTM 的預測準確率
+lstm:
+  device: "cuda:0"
+  sequence_length: 9 # 輸入前 X 個特徵向量來預測下一個特徵向量
+  hidden_size: 256
+  num_layers: 2
+
+  # LSTM 模型權重與訓練路徑
+  encoder_model_path: "model/Node_Encoder_Model/7_11/7_11_150.pth"
+  lstm_weights_folder: "model/LSTM"
+  lstm_weights_path: "model/LSTM/Weight/7_12/7_31_210.pth"
+
+  # 訓練用的 tensor 資料夾
+  train_tensor_data_dir: "Database/Data/Full Path Tensor"
+  train_tensor_info_dir: "Database/Data/Full Path Tensor"
+
+  # 最佳影片與特徵路徑
+  best_info_path: "Map/Best_Video/Basic Graph/Full_Path_Best_Video_information.txt"
+  best_features_path: "Map/Best_Video/Basic Graph/Full_Path_Best_Video.npy"
+
+  # 測試與推論資料路徑
+  test_info_path: "Map/Full Path Test Video/Full_Path_TestVideo_information.txt"
+  test_video_path: "Map/Full Path Test Video/Full_Path_TestVideo.mp4"
+
+  # 訓練超參數
+  num_epochs: 210
+  learning_rate: 1e-4
+  batch_size: 32
+  val_split: 0.2
+
+  # 預測輸出設定
+  output_video_path: "Map/prediction/LSTM_predicted_map.mp4"
+  output_features_path: "Map/prediction/LSTM_predicted_features.npy"
+  map_image_path: "Map/map.png"
+
+  # 測試路線的轉折點 (對應原程式的 pts)
+  map_points:
+    - [1137, 342] # 旋轉點 A
+    - [880, 312]  # 旋轉點 B
+    - [880, 419]  # 旋轉點 C
+    - [651, 439]  # 旋轉點 E
+    - [664, 322]  # 旋轉點 D
+
+# 各個旋轉點座標，供參考：
+# pts = [
+#     (1137, 902-560), # 旋轉點 A
+#     (880, 902-590), # 旋轉點 B
+#     (880, 902-483), # 旋轉點 C
+#     (651, 902-463), # 旋轉點 E
+#     (664, 902-580), # 旋轉點 D
+#     (651, 902-463), # 旋轉點 E
+#     (214, 902-443), # 旋轉點 G
+#     (794, 902-294), # 旋轉點 L
+#     (880, 902-483), # 旋轉點 C
+#     (1639, 902-483) # 旋轉點 K
+#     ]
+
+  # 計算地圖路線方向向量的索引，如： map_points[0] --> map_points[1], map_points[1] --> map_points[1]（位於旋轉點旋轉，等同旋轉點 B 走到旋轉點 B）, map_points[1] --> map_points[2]
+  static_path_indices: [0, 1, 1, 2, 2, 3, 3, 4]
+
+  ####################################################################### 動態投票距離限制（目前關閉）
+  # 總開關：設為 True 來啟用動態投票機制，設為 False 則停用
+  enable_voting_mechanism: False
+
+  # 投票窗口大小，即參考前 n 個預測結果
+  voting_window_size: 15
+
+  # 距離誤差閥值 (ε)，用於動態計算容錯範圍
+  # 容錯範圍 = X (時間差) + DISTANCE_ERROR_MARGIN
+  # 例如，與上一幀(X=1)比，容錯為 1+50=51。與15幀前(X=15)比，容錯為 15+50=65
+  distance_error_margin: 50
+  #######################################################################
+
+
+
+# 用於 scripts/tku/visual_navigation_system/16_visualize_graph.py, scripts/17_shortest_path.py，手動建立各個不同路段最佳影片之間銜接的 frame 作為跨影片的邊。
+graph:
+  # PyGraphviz/pydot layout engine (sfdp, fdp, dot)
+  layout_prog: 'sfdp'
+
+  # 預設使用的影片名稱標籤
+  # 需要建立雙向邊的影片索引 (例如旋轉影片，以第 16 部 ~ 第 22 部影片為範例，也就是旋轉A~旋轉L)
+  bidirectional_video_indices: [16, 22]
+  video_names: [
+    "A_F", "B_F", "C_F", "D_F", "E_F", "F_F", "G_F", "H_F",
+    "A_R", "B_R", "C_R", "D_R", "E_R", "F_R", "G_R", "H_R",
+    "Rot_A", "Rot_B", "Rot_C", "Rot_D", "Rot_E", "Rot_G", "Rot_K", "Rot_L"
+  ]
+  # 載入建立圖的特徵檔案所在的根目錄 (順序必須與上面的 video_names 一一對應)，並讀取全部的 .npy 檔
+  # 若是直接對應 concat_best_videos 的輸出特徵，我們這裡直接從 Best_Video_Features 讀取全部 24 個檔案
+  features_base_dir: "Map/Best_Video/Best_Video_Features"
+  feature_subpaths: [
+    # 直線順向 (0-7)
+    "直線A/直線A_順向.npy", "直線B/直線B_順向.npy", "直線C/直線C_順向.npy", "直線D/直線D_順向.npy",
+    "直線E/直線E_順向.npy", "直線F/直線F_順向.npy", "直線G/直線G_順向.npy", "直線H/直線H_順向.npy",
+    # 直線逆向 (8-15)
+    "直線A/直線A_逆向.npy", "直線B/直線B_逆向.npy", "直線C/直線C_逆向.npy", "直線D/直線D_逆向.npy",
+    "直線E/直線E_逆向.npy", "直線F/直線F_逆向.npy", "直線G/直線G_逆向.npy", "直線H/直線H_逆向.npy",
+    # 旋轉順逆向 (16-23)
+    "旋轉A/旋轉A.npy", "旋轉B/旋轉B.npy", "旋轉C/旋轉C.npy", "旋轉D/旋轉D.npy",
+    "旋轉E/旋轉E.npy", "旋轉G/旋轉G.npy", "旋轉K/旋轉K.npy", "旋轉L/旋轉L.npy"
+  ]
+
+  # 輸出的視覺化地圖圖片
+  output_graph_image: "Map/Graph_Visualization.png"
+  output_shortest_path_image: "Map/Shortest_Path.png"
+
+  # 手動建立跨影片單向邊緣交接點（這部分要自己人工看，在現實中哪部影片的第幾個 frame 可以跟下一個路徑的影片 frame 相接）
+  # 格式: [from_video_idx, from_frame, to_video_idx, to_frame]
+  cross_video_edges:
+    - [0, 129, 17, 109]   # 直線A順 --> 旋轉B順
+    - [17, 150, 1, 0]     # 旋轉B順 --> 直線B順
+    - [1, 53, 18, 0]      # 直線B順 --> 旋轉C順
+    - [18, 53, 2, 0]      # 旋轉C順(往直線C) --> 直線C順
+    - [2, 114, 20, 168]   # 直線C順 --> 旋轉E順
+    - [20, 246, 3, 0]     # 旋轉E順(往直線D) --> 直線D順
+    - [3, 58, 19, 163]    # 直線D順 --> 旋轉D順
+    - [19, 254, 11, 0]    # 旋轉D順 --> 直線D逆
+    - [11, 58, 20, 118]   # 直線D逆 --> 旋轉E順
+    - [20, 166, 4, 0]     # 旋轉E順(往直線E) --> 直線E順
+    - [4, 218, 21, 56]    # 直線E順 --> 旋轉G順
+    - [21, 136, 5, 0]     # 旋轉G順 --> 直線F順
+    - [5, 263, 23, 0]     # 直線F順 --> 旋轉L順
+    - [23, 44, 6, 0]      # 旋轉L順 --> 直線G順
+    - [6, 68, 18, 142]    # 直線G順 --> 旋轉C順
+    - [18, 177, 7, 0]     # 旋轉C順(往直線H) --> 直線H順
+    - [7, 379, 22, 82]    # 直線H順 --> 旋轉K順
+    - [22, 162, 15, 0]    # 旋轉K順 --> 直線H逆
+    - [15, 379, 18, 49]   # 直線H逆 --> 旋轉C逆
+    - [18, 0, 14, 17]     # 旋轉C逆(往直線G) --> 直線G逆
+    - [14, 103, 23, 129]  # 直線G逆 --> 旋轉L逆
+    - [23, 101, 13, 0]    # 旋轉L逆  --> 直線F逆
+    - [13, 298, 21, 56]   # 直線F逆 --> 旋轉G逆
+    - [21, 0, 12, 0]      # 旋轉G逆 --> 直線E逆
+    - [12, 218, 20, 58]   # 直線E逆 --> 旋轉E逆
+    - [20, 58, 10, 0]     # 旋轉E逆(往直線C) --> 直線C逆
+    - [10, 114, 18, 174]  # 直線C逆 --> 旋轉C逆(往直線B)
+    - [18, 115, 9, 0]     # 旋轉C逆(往直線B) --> 直線B逆
+    - [9, 53, 17, 78]     # 直線B逆 --> 旋轉B逆
+    - [17, 53, 8, 40]     # 旋轉B逆 --> 直線A逆
+    - [8, 106, 16, 145]   # 直線A逆 --> 旋轉A逆
+    - [16, 0, 0, 74]      # 旋轉A逆 --> 直線A順
+    - [18, 182, 7, 0]     # 額外: 旋轉C逆(往直線H) --> 直線H順
+    - [18, 0, 14, 0]      # 額外: 旋轉C順(往直線G) --> 直線G逆

@@ -6,7 +6,7 @@ channels:
   - defaults
 dependencies:
   # Python version — update to match your project's requirements
-  - python=3.9
+  - python=3.12
   - pip
   - ipykernel
 
@@ -15,12 +15,12 @@ dependencies:
   - scipy~=1.11
   - pandas~=2.1
   - matplotlib~=3.8
-  
+
   # PyTorch & CUDA (Adjust versions based on your local GPU drivers)
-  - pytorch=2.3.1
-  - torchvision=0.18.1
-  - torchaudio=2.3.1
-  - pytorch-cuda=12.1
+  # - pytorch=2.13.0
+  # - torchvision=0.28.0
+  # - torchaudio==2.11.0+cu130
+  # - pytorch-cuda=13.0
   # coding style
 
 
@@ -29,11 +29,23 @@ dependencies:
   - ruff=0.4.10
   - pytest=8.2.2
   - pytest-cov=5.0.0
-  
+
   # Pip packages — add project-specific dependencies below
   - pip:
+    # PyTorch & CUDA
+    - --extra-index-url https://download.pytorch.org/whl/cu130
+    - torch==2.13.0
+    - torchvision==0.28.0
+    - torchaudio==2.11.0+cu130
     # Installs the local package in editable mode (required)
     - -e .[dev]
     # Examples of common AI/research packages:
     # - transformers
-
+    - torch-geometric==2.8.0
+    - opencv-python==5.0.0.93
+    - pyyaml==6.0.3
+    - tqdm==4.68.4
+    - pillow==12.2.0
+    - networkx==3.6.1
+    - pygraphviz==2.0
+    - pyqt5==5.15.11
