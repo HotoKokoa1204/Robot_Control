@@ -1,1 +1,9 @@
-"""Core module for AGILAB research projects."""
+"""
+Module: agilab_lib
+Stage: Library
+Author: AGILAB NTNU
+Date: 2026-09-01
+Description: Core library for AGILAB Visual Navigation System research.
+"""
+
+__version__ = "0.1.0"
