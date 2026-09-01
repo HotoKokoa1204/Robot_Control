@@ -34,6 +34,10 @@ dependencies:
   - pip:
     # Installs the local package in editable mode (required)
     - -e .[dev]
+    # PyTorch Lightning & Experiment Tracking
+    - lightning~=2.2.0
+    - hydra-core~=1.3.2
+    - omegaconf~=2.3.0
+    - wandb~=0.17.0
     # Examples of common AI/research packages:
     # - transformers
-
