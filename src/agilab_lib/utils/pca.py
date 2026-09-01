@@ -1,7 +1,7 @@
 """
 Module: pca
 Stage: Library
-Author: AGILAB NTNU
+Author: KafuuChino
 Date: 2026-09-01
 Description: Batched Incremental PCA using PyTorch for latent space reduction.
 """

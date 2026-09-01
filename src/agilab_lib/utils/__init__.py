@@ -1,7 +1,7 @@
 """
 Module: utils
 Stage: Library
-Author: AGILAB NTNU
+Author: KafuuChino
 Date: 2026-09-01
 Description: Utility package with interpolation, evaluation, and PCA tools.
 """

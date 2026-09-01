@@ -1,7 +1,7 @@
 """
 Module: eval_metrics
 Stage: Library
-Author: AGILAB NTNU
+Author: KafuuChino
 Date: 2026-09-01
 Description: Evaluation metrics for latent predictions, angles, and decoding.
 """

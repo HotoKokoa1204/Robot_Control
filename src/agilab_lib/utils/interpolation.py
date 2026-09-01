@@ -1,7 +1,7 @@
 """
 Module: interpolation
 Stage: Library
-Author: AGILAB NTNU
+Author: KafuuChino
 Date: 2026-09-01
 Description: Latent vector and keyframe interpolation utilities.
 """

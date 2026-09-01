@@ -7,7 +7,7 @@ name = "agilab_lib"
 version = "0.1.0"
 description = "Visual Navigation System - AGILAB Research Software"
 authors = [
-    {name = "AGILAB NTNU", email = "mjhsu@ntnu.edu.tw"}
+    {name = "KafuuChino"}
 ]
 readme = "README.md"
 requires-python = ">=3.8"
