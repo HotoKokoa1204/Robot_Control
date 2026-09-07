@@ -1,0 +1,19 @@
+# @package _global_
+
+# Model architecture settings
+latent_dim: 128
+hidden_dims:
+  - 256
+  - 128
+use_batch_norm: true
+
+# Optimization hyperparameters
+lr: 0.001
+batch_size: 16
+max_epochs: 2
+
+# Data and checkpoint settings
+data_dir: "data"
+use_dummy_if_missing: true
+ae_checkpoint: "" # Optional Autoencoder checkpoint for feature extraction verification
+output_checkpoint: "checkpoints/angle_predictor.pt"
