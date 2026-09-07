@@ -18,8 +18,8 @@ from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
 )
-from agilab_lib.models.autoencoder import Autoencoder
 from agilab_lib.models.rrdn import RRDN
+from agilab_lib.models.vae import VAE
 from agilab_lib.utils.interpolation import linear_interpolate_latent_sequence
 from omegaconf import DictConfig, OmegaConf
 
@@ -62,12 +62,12 @@ def main(cfg: DictConfig) -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 1. Initialize Autoencoder
-    autoencoder = Autoencoder(latent_dim=int(cfg.latent_dim)).to(device)
-    if cfg.ae_checkpoint and os.path.exists(cfg.ae_checkpoint):
-        autoencoder.load_state_dict(torch.load(cfg.ae_checkpoint, map_location=device))
-        print(f"Loaded Autoencoder checkpoint: {cfg.ae_checkpoint}")
-    autoencoder.eval()
+    # 1. Initialize VAE
+    vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
+    if cfg.vae_checkpoint and os.path.exists(cfg.vae_checkpoint):
+        vae.load_state_dict(torch.load(cfg.vae_checkpoint, map_location=device))
+        print(f"Loaded VAE checkpoint: {cfg.vae_checkpoint}")
+    vae.eval()
 
     # 2. Load dataset
     if os.path.exists(cfg.video_path):
@@ -101,7 +101,7 @@ def main(cfg: DictConfig) -> None:
     keyframe_tensors = [dataset[idx] for idx in valid_indices]
     with torch.no_grad():
         batch_kf = torch.stack(keyframe_tensors, dim=0).to(device)
-        keyframe_latents = autoencoder.encode(batch_kf)
+        keyframe_latents = vae.get_latent(batch_kf)
 
     # 5. Linear interpolation in Latent Vector space
     interp_latents = linear_interpolate_latent_sequence(
@@ -111,7 +111,7 @@ def main(cfg: DictConfig) -> None:
 
     # 6. Decode Latent Vectors to image frames
     with torch.no_grad():
-        decoded_frames = autoencoder.decode(interp_latents)
+        decoded_frames = vae.decode(interp_latents)
 
     # 7. Optional RRDN Enhanced Decoder upscaling
     if cfg.use_rrdn:

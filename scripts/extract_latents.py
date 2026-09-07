@@ -3,7 +3,7 @@ Module: extract_latents
 Stage: Script
 Author: KafuuChino
 Date: 2026-09-07
-Description: Extract and cache Latent Vectors from videos via Autoencoder.
+Description: Extract and cache Latent Vectors from videos via VAE.
 """
 
 from pathlib import Path
@@ -12,13 +12,13 @@ from typing import Dict, List, Union
 import cv2
 import hydra
 import torch
-from agilab_lib.models.autoencoder import Autoencoder
+from agilab_lib.models.vae import VAE
 from omegaconf import DictConfig, OmegaConf
 
 
 def extract_video_latents(
     video_path: Path,
-    model: Autoencoder,
+    model: VAE,
     device: torch.device,
     frameskip: int = 1,
     img_width: int = 192,
@@ -29,7 +29,7 @@ def extract_video_latents(
 
     Args:
         video_path: Path to video file.
-        model: Trained Autoencoder model.
+        model: Trained VAE model.
         device: Torch compute device.
         frameskip: Frame skipping step size.
         img_width: Frame resize width.
@@ -64,7 +64,7 @@ def extract_video_latents(
             if len(frames_batch) >= batch_size:
                 batch_tensor = torch.stack(frames_batch).to(device)
                 with torch.no_grad():
-                    z = model.encode(batch_tensor).cpu()
+                    z = model.get_latent(batch_tensor).cpu()
                 latents_list.append(z)
                 frames_batch.clear()
 
@@ -76,7 +76,7 @@ def extract_video_latents(
     if frames_batch:
         batch_tensor = torch.stack(frames_batch).to(device)
         with torch.no_grad():
-            z = model.encode(batch_tensor).cpu()
+            z = model.get_latent(batch_tensor).cpu()
         latents_list.append(z)
 
     cat_latents = (
@@ -105,14 +105,14 @@ def main(cfg: DictConfig) -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = Autoencoder(latent_dim=int(cfg.latent_dim)).to(device)
-    ae_ckpt = Path(str(cfg.ae_checkpoint))
-    if not ae_ckpt.exists():
-        raise FileNotFoundError(f"Autoencoder checkpoint not found: {ae_ckpt}")
+    model = VAE(latent_dim=int(cfg.latent_dim)).to(device)
+    vae_ckpt = Path(str(cfg.vae_checkpoint))
+    if not vae_ckpt.exists():
+        raise FileNotFoundError(f"VAE checkpoint not found: {vae_ckpt}")
 
-    model.load_state_dict(torch.load(ae_ckpt, map_location=device))
+    model.load_state_dict(torch.load(vae_ckpt, map_location=device))
     model.eval()
-    print(f"Loaded Autoencoder checkpoint from: {ae_ckpt}")
+    print(f"Loaded VAE checkpoint from: {vae_ckpt}")
 
     root = Path(str(cfg.data_root))
     out_root = Path(str(cfg.output_dir))

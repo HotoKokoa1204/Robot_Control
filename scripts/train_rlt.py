@@ -17,8 +17,8 @@ from agilab_lib.datasets.latent_dataset import (
     CachedLatentDataset,
     DummyLatentPairDataset,
 )
-from agilab_lib.models.autoencoder import Autoencoder
 from agilab_lib.models.rlt import ResidualLatentTransformer
+from agilab_lib.models.vae import VAE
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
@@ -83,14 +83,14 @@ def run_validation_inference(
 
     print(f"Validation inference output Latent Vector shape: {pred_latent.shape}")
 
-    # Optional Autoencoder decoding validation if checkpoint provided
-    if cfg.ae_checkpoint and os.path.exists(str(cfg.ae_checkpoint)):
-        autoencoder = Autoencoder(latent_dim=latent_dim).to(device)
-        ae_state = torch.load(str(cfg.ae_checkpoint), map_location=device)
-        autoencoder.load_state_dict(ae_state)
-        autoencoder.eval()
+    # Optional VAE decoding validation if checkpoint provided
+    if cfg.vae_checkpoint and os.path.exists(str(cfg.vae_checkpoint)):
+        vae = VAE(latent_dim=latent_dim).to(device)
+        vae_state = torch.load(str(cfg.vae_checkpoint), map_location=device)
+        vae.load_state_dict(vae_state)
+        vae.eval()
         with torch.no_grad():
-            recon_frames = autoencoder.decode(pred_latent)
+            recon_frames = vae.decode(pred_latent)
         print(f"Reconstructed frames from predicted latents: {recon_frames.shape}")
 
 

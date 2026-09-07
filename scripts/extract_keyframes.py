@@ -15,7 +15,7 @@ from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
 )
-from agilab_lib.models.autoencoder import Autoencoder
+from agilab_lib.models.vae import VAE
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 from omegaconf import DictConfig, OmegaConf
 
@@ -33,12 +33,12 @@ def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    autoencoder = Autoencoder(latent_dim=int(cfg.latent_dim))
+    vae = VAE(latent_dim=int(cfg.latent_dim))
 
-    if cfg.ae_checkpoint and os.path.exists(cfg.ae_checkpoint):
-        state_dict = torch.load(cfg.ae_checkpoint, map_location=device)
-        autoencoder.load_state_dict(state_dict)
-        print(f"Loaded Autoencoder checkpoint from: {cfg.ae_checkpoint}")
+    if cfg.vae_checkpoint and os.path.exists(cfg.vae_checkpoint):
+        state_dict = torch.load(cfg.vae_checkpoint, map_location=device)
+        vae.load_state_dict(state_dict)
+        print(f"Loaded VAE checkpoint from: {cfg.vae_checkpoint}")
 
     if os.path.exists(cfg.video_path):
         dataset = VideoDataset(cfg.video_path)
@@ -51,7 +51,7 @@ def main(cfg: DictConfig) -> None:
 
     frames = [dataset[i] for i in range(len(dataset))]
     keyframe_indices = extract_keyframe_indices(
-        autoencoder=autoencoder,
+        vae=vae,
         frames=frames,
         tau=float(cfg.tau),
         device=device,
