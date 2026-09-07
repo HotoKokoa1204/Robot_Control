@@ -1,0 +1,22 @@
+# @package _global_
+
+# Source video and keyframe metadata
+video_path: "data/input_video.mp4"
+keyframes_json: "data/keyframes.json"
+
+# Autoencoder configuration
+latent_dim: 128
+ae_checkpoint: "" # Optional path to pretrained Autoencoder checkpoint
+
+# Interpolation configuration
+interp_steps: 10 # Number of intermediate frames inserted between keyframes
+
+# RRDN Enhanced Decoder configuration
+use_rrdn: false # Set true to upscale frames via RRDN
+rrdn_checkpoint: "" # Optional path to pretrained RRDN checkpoint
+rrdn_upscale_factor: 2
+
+# Output video settings
+output_video: "data/generated_video.mp4"
+fps: 30
+use_dummy_if_missing: true
