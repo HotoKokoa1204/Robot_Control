@@ -6,10 +6,13 @@ Date: 2026-09-07
 Description: Unit tests for Residual Latent Transformer and latent datasets.
 """
 
+from pathlib import Path
+
 import numpy as np
 import torch
 from agilab_lib.datasets.latent_dataset import (
     AngleDataset,
+    CachedLatentDataset,
     DummyLatentHorizonDataset,
     DummyLatentPairDataset,
     InMemoryLatentOffsetDataset,
@@ -111,3 +114,60 @@ def test_in_memory_latent_offset_dataset_empty() -> None:
     """Test InMemoryLatentOffsetDataset initialization without video assets."""
     dataset = InMemoryLatentOffsetDataset()
     assert len(dataset) == 0
+
+
+def test_cached_latent_dataset_rotation(tmp_path: Path) -> None:
+    """Test CachedLatentDataset in rotation mode with temporary latent cache.
+
+    Args:
+        tmp_path: Pytest temporary directory path fixture.
+    """
+    dummy_latents = torch.randn(10, 128)
+    dummy_record = {
+        "video_path": "dummy_360.mp4",
+        "latents": dummy_latents,
+        "total_frames": 10,
+        "fps": 30.0,
+    }
+    torch.save(dummy_record, tmp_path / "rotation_sample.pt")
+
+    dataset = CachedLatentDataset(
+        cache_dir=tmp_path,
+        mode="rotation",
+        samples_per_frame=2,
+        max_frame_offset=3,
+    )
+    assert len(dataset) == 10 * 2
+    z_i, z_j, angle = dataset[0]
+    assert z_i.shape == (128,)
+    assert z_j.shape == (128,)
+    assert angle.shape == (1,)
+
+
+def test_cached_latent_dataset_forward(tmp_path: Path) -> None:
+    """Test CachedLatentDataset in forward mode with step distance labeling.
+
+    Args:
+        tmp_path: Pytest temporary directory path fixture.
+    """
+    dummy_latents = torch.randn(12, 128)
+    dummy_record = {
+        "video_path": "dummy_path.mp4",
+        "latents": dummy_latents,
+        "total_frames": 12,
+        "fps": 30.0,
+    }
+    torch.save(dummy_record, tmp_path / "forward_sample.pt")
+
+    dataset = CachedLatentDataset(
+        cache_dir=tmp_path,
+        mode="forward",
+        samples_per_frame=3,
+        max_frame_offset=4,
+        step_distance_meters=0.1,
+    )
+    assert len(dataset) == 12 * 3
+    z_i, z_j, dist = dataset[0]
+    assert z_i.shape == (128,)
+    assert z_j.shape == (128,)
+    assert dist.shape == (1,)
