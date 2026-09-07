@@ -193,13 +193,13 @@ class DummyLatentPairDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Ten
 class VideoLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
     """Encodes video frames into initial and horizon sequence Latent Vectors.
 
-    Extracts (z_t, [z_{t+1}..z_{t+horizon}]) pairs using an Autoencoder.
+    Extracts (z_t, [z_{t+1}..z_{t+horizon}]) pairs using a VAE.
     """
 
     def __init__(
         self,
         root_dir: Union[str, Path],
-        autoencoder_model: nn.Module,
+        vae_model: nn.Module,
         frameskip: int = 1,
         horizon: int = 10,
         device: str = "cpu",
@@ -209,10 +209,10 @@ class VideoLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
 
         Args:
             root_dir: Directory containing input video files.
-            autoencoder_model: Autoencoder instance used for frame encoding.
+            vae_model: VAE instance used for frame encoding.
             frameskip: Number of frames to skip between sequence steps.
             horizon: Prediction horizon steps into the future.
-            device: Compute device string for Autoencoder.
+            device: Compute device string for VAE.
             img_size: Expected image resolution (width, height).
         """
         super().__init__()
@@ -220,8 +220,8 @@ class VideoLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
         self.device: torch.device = torch.device(device)
         self.img_size: Tuple[int, int] = img_size
         self.horizon: int = horizon
-        self.ae: nn.Module = autoencoder_model.to(self.device)
-        self.ae.eval()
+        self.vae: nn.Module = vae_model.to(self.device)
+        self.vae.eval()
         self.samples: List[Tuple[torch.Tensor, torch.Tensor]] = []
 
         if self.root_dir.exists():
@@ -248,18 +248,21 @@ class VideoLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
             latents: List[torch.Tensor] = []
             ret, frame = cap.read()
             while ret:
-                frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                frame_gray = cv2.resize(
-                    frame_gray, self.img_size, interpolation=cv2.INTER_AREA
+                frame_resized = cv2.resize(
+                    frame, self.img_size, interpolation=cv2.INTER_AREA
                 )
-                frame_rgb = cv2.cvtColor(frame_gray, cv2.COLOR_GRAY2RGB)
-                x = (
-                    torch.from_numpy(frame_rgb).float().permute(2, 0, 1).unsqueeze(0)
-                    / 255.0
-                )
+                frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                frame_t = torch.from_numpy(frame_rgb).float().permute(2, 0, 1) / 255.0
+                x = frame_t.unsqueeze(0)
 
                 with torch.no_grad():
-                    z = self.ae.encode(x.to(self.device)).cpu().squeeze(0)
+                    if hasattr(self.vae, "get_latent"):
+                        z = self.vae.get_latent(x.to(self.device)).cpu().squeeze(0)
+                    elif hasattr(self.vae, "encode"):
+                        enc = self.vae.encode(x.to(self.device))
+                        z = (enc[0] if isinstance(enc, tuple) else enc).cpu().squeeze(0)
+                    else:
+                        z = self.vae(x.to(self.device)).cpu().squeeze(0)
                 latents.append(z)
 
                 for _ in range(frameskip):

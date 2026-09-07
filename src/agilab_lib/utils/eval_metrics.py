@@ -42,17 +42,17 @@ def evaluate_angle_prediction_mae(
     return float(F.l1_loss(predicted_angles, ground_truth_angles).item())
 
 
-def decode_latents_to_frames(autoencoder: Any, latents: torch.Tensor) -> torch.Tensor:
+def decode_latents_to_frames(decoder_model: Any, latents: torch.Tensor) -> torch.Tensor:
     """Decodes a batch or sequence of latents back to image tensors (B, 3, H, W).
 
     Args:
-        autoencoder: Autoencoder model instance with a .decode() method.
+        decoder_model: VAE or decoder model instance with a .decode() method.
         latents: Latent vector tensor (B, latent_dim).
 
     Returns:
         Reconstructed frames tensor (B, 3, H, W).
     """
-    autoencoder.eval()
+    decoder_model.eval()
     with torch.no_grad():
-        frames = autoencoder.decode(latents)
+        frames = decoder_model.decode(latents)
     return frames
