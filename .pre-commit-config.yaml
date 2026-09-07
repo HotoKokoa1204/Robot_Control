@@ -1,17 +1,28 @@
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+  # 1. GitHub 官方基礎排版與檔案檢查
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
     hooks:
-    -   id: trailing-whitespace
-    -   id: end-of-file-fixer
-    -   id: check-yaml
-    -   id: check-added-large-files
-        args: ['--maxkb=50000'] # Prevent committing files > 50MB
--   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.3.2
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: check-added-large-files
+        args: ['--maxkb=51200']
+
+  # 2. Ruff 程式碼檢查與自動格式化
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
     hooks:
-    # Run the linter.
-    - id: ruff
-      args: [ --fix ]
-    # Run the formatter.
-    - id: ruff-format
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # 3. AGILAB 實驗室規範檢查 (Commit 格式、Type hints、Docstrings、檔案長度)
+  - repo: https://github.com/zi-yue-1129/agilab-skills
+    rev: main
+    hooks:
+      - id: agilab-commit-msg
+      - id: agilab-type-hints
+      - id: agilab-docstrings
+      - id: agilab-file-length

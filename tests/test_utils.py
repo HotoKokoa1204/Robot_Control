@@ -1,8 +1,9 @@
+"""Unit tests for utility functions in agilab_lib.utils."""
+
 import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-
 from agilab_lib.utils.eval_metrics import (
     decode_latents_to_frames,
     evaluate_angle_prediction_mae,
@@ -15,7 +16,8 @@ from agilab_lib.utils.interpolation import (
 from agilab_lib.utils.pca import BatchedPCA
 
 
-def test_linear_interpolate_latent_sequence_tensor_shape():
+def test_linear_interpolate_latent_sequence_tensor_shape() -> None:
+    """Test interpolation sequence tensor output shape and boundary values."""
     latents = torch.randn(5, 128)
     interp_frames = 2
     out = linear_interpolate_latent_sequence(latents, interp_frames=interp_frames)
@@ -25,7 +27,8 @@ def test_linear_interpolate_latent_sequence_tensor_shape():
     assert torch.allclose(out[-1], latents[-1])
 
 
-def test_linear_interpolate_latent_sequence_edge_cases():
+def test_linear_interpolate_latent_sequence_edge_cases() -> None:
+    """Test edge cases with zero interpolation frames and single latent."""
     latents = torch.randn(5, 128)
     out_zero = linear_interpolate_latent_sequence(latents, interp_frames=0)
     assert out_zero.shape == (5, 128)
@@ -35,7 +38,8 @@ def test_linear_interpolate_latent_sequence_edge_cases():
     assert out_single.shape == (1, 128)
 
 
-def test_interpolate_all_frames_numpy_shape():
+def test_interpolate_all_frames_numpy_shape() -> None:
+    """Test NumPy interpolation output shape and endpoints."""
     latents = np.random.randn(4, 64).astype(np.float32)
     interp_steps = 3
     out = interpolate_all_frames_numpy(latents, interpolation_steps=interp_steps)
@@ -45,7 +49,8 @@ def test_interpolate_all_frames_numpy_shape():
     assert np.allclose(out[-1], latents[-1])
 
 
-def test_interpolate_all_frames_numpy_edge_cases():
+def test_interpolate_all_frames_numpy_edge_cases() -> None:
+    """Test NumPy interpolation with zero steps and single item."""
     latents = np.random.randn(4, 64).astype(np.float32)
     out_zero = interpolate_all_frames_numpy(latents, interpolation_steps=0)
     assert out_zero.shape == (4, 64)
@@ -55,7 +60,8 @@ def test_interpolate_all_frames_numpy_edge_cases():
     assert out_single.shape == (1, 64)
 
 
-def test_evaluate_latent_prediction_mse():
+def test_evaluate_latent_prediction_mse() -> None:
+    """Test MSE loss evaluation for latent prediction."""
     pred = torch.randn(8, 128)
     gt = torch.randn(8, 128)
     loss = evaluate_latent_prediction_mse(pred, gt)
@@ -66,7 +72,8 @@ def test_evaluate_latent_prediction_mse():
     assert pytest.approx(perfect_loss, abs=1e-6) == 0.0
 
 
-def test_evaluate_angle_prediction_mae():
+def test_evaluate_angle_prediction_mae() -> None:
+    """Test MAE loss evaluation for angle prediction."""
     pred = torch.tensor([[10.0], [-15.0], [30.0]])
     gt = torch.tensor([[12.0], [-10.0], [25.0]])
     loss = evaluate_angle_prediction_mae(pred, gt)
@@ -75,13 +82,26 @@ def test_evaluate_angle_prediction_mae():
     assert pytest.approx(loss, abs=1e-5) == expected
 
 
-def test_decode_latents_to_frames():
+def test_decode_latents_to_frames() -> None:
+    """Test decoding latent representations into image frames."""
+
     class DummyAutoencoder(nn.Module):
-        def __init__(self):
+        """Dummy autoencoder for testing frame decoding."""
+
+        def __init__(self) -> None:
+            """Initialize dummy autoencoder."""
             super().__init__()
             self.decoder = nn.Linear(128, 3 * 108 * 192)
 
-        def decode(self, z):
+        def decode(self, z: torch.Tensor) -> torch.Tensor:
+            """Decode latent representation to frame tensor.
+
+            Args:
+                z: Input latent tensor.
+
+            Returns:
+                Decoded frame tensor.
+            """
             return self.decoder(z).view(-1, 3, 108, 192)
 
     ae = DummyAutoencoder()
@@ -93,7 +113,8 @@ def test_decode_latents_to_frames():
     assert frames.shape == (4, 3, 108, 192)
 
 
-def test_batched_pca_fit_transform():
+def test_batched_pca_fit_transform() -> None:
+    """Test BatchedPCA fit_transform and subsequent transform."""
     x = torch.randn(50, 128)
     pca = BatchedPCA(n_components=2)
     out = pca.fit_transform(x)
@@ -108,7 +129,8 @@ def test_batched_pca_fit_transform():
     assert new_out.shape == (10, 2)
 
 
-def test_batched_pca_unfitted_raises_error():
+def test_batched_pca_unfitted_raises_error() -> None:
+    """Test that BatchedPCA raises error when transform is called before fit."""
     pca = BatchedPCA(n_components=2)
     with pytest.raises(RuntimeError, match="must be fitted"):
         pca.transform(torch.randn(10, 128))
