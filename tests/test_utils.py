@@ -85,11 +85,11 @@ def test_evaluate_angle_prediction_mae() -> None:
 def test_decode_latents_to_frames() -> None:
     """Test decoding latent representations into image frames."""
 
-    class DummyAutoencoder(nn.Module):
-        """Dummy autoencoder for testing frame decoding."""
+    class DummyVAE(nn.Module):
+        """Dummy VAE for testing frame decoding."""
 
         def __init__(self) -> None:
-            """Initialize dummy autoencoder."""
+            """Initialize dummy VAE."""
             super().__init__()
             self.decoder = nn.Linear(128, 3 * 108 * 192)
 
@@ -104,12 +104,12 @@ def test_decode_latents_to_frames() -> None:
             """
             return self.decoder(z).view(-1, 3, 108, 192)
 
-    ae = DummyAutoencoder()
-    ae.train()
+    vae = DummyVAE()
+    vae.train()
     latents = torch.randn(4, 128)
-    frames = decode_latents_to_frames(ae, latents)
+    frames = decode_latents_to_frames(vae, latents)
 
-    assert not ae.training
+    assert not vae.training
     assert frames.shape == (4, 3, 108, 192)
 
 
