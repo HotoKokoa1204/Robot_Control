@@ -8,13 +8,13 @@
 
 **Visual Navigation System** is a research library and experimental pipeline developed by AGILAB for video representation learning and self-supervised robot visual navigation.
 
-The system compresses continuous video observation streams into compact **Latent Vectors** using an **Autoencoder**, detects informative navigation milestones (**Keyframes**) based on Euclidean distance threshold **Tau ($\tau$)**, predicts future states using a 3D **Motion Command** conditioned **Residual Latent Transformer**, upscales decoded observations using an **RRDN** super-resolution decoder, and estimates robot steering actions with an **Angle Predictor**.
+The system compresses continuous video observation streams into compact **Latent Vectors** using a **VAE** (Variational Autoencoder), detects informative navigation milestones (**Keyframes**) based on Euclidean distance threshold **Tau ($\tau$)**, predicts future states using a 3D **Motion Command** conditioned **Residual Latent Transformer**, upscales decoded observations using an **RRDN** super-resolution decoder, and estimates robot steering actions with an **Angle Predictor**.
 
 ### Core Architecture Components
 
-- **Autoencoder / VAE**: Compresses RGB video frames $(3, 108, 192)$ into compact 128-dimensional **Latent Vectors** and reconstructs them back to image space.
+- **VAE** (Variational Autoencoder): Compresses RGB video frames $(3, 108, 192)$ into compact 128-dimensional **Latent Vectors** with a regularized continuous latent space and reconstructs them back to image space.
 - **Residual Latent Transformer**: Predicts future Latent Vectors conditioned on a unified 3D **Motion Command** $[\sin \theta, \cos \theta, d]$ combining rotation angle $\theta$ (degrees) and linear translation distance $d$ (meters).
-- **RRDN** (Residual in Residual Dense Network): Enhanced super-resolution decoder restoring high-fidelity spatial details to decoded latent reconstructions (see [ADR-0001](docs/adr/0001-rrdn-as-enhanced-decoder.md)).
+- **RRDN** (Residual in Residual Dense Network): Enhanced super-resolution decoder restoring high-fidelity spatial details to decoded latent reconstructions.
 - **Angle Predictor**: Multi-layer perceptron taking a pair of Latent Vectors (current frame and target Keyframe) to predict relative rotation angle Motion Commands for navigation control.
 - **Keyframe Extraction**: Extracts keyframe indices along video trajectories where the Latent Vector Euclidean distance exceeds threshold $\tau$.
 
@@ -53,24 +53,25 @@ The system compresses continuous video observation streams into compact **Latent
 ```text
 Visual_Navigation_System/
 ├── configs/                          # Hydra YAML configuration files
+│   ├── train_vae.yaml                # VAE model training settings
 │   ├── extract_keyframes.yaml        # Keyframe extraction settings
+│   ├── extract_latents.yaml          # Offline latent caching settings
 │   ├── generate_video.yaml           # Video interpolation & RRDN decode settings
 │   ├── train_rlt.yaml                # Residual Latent Transformer training
 │   └── train_angle_predictor.yaml    # Angle Predictor training
-├── docs/                             # Architecture decision records
-│   └── adr/
-│       └── 0001-rrdn-as-enhanced-decoder.md
 ├── scripts/                          # Main pipeline execution scripts
+│   ├── train_vae.py                  # Script 0: Train VAE on video frames
 │   ├── extract_keyframes.py          # Script 1: Extract Keyframes via Tau (τ)
-│   ├── generate_video.py             # Script 2: Latent interpolation & video export
-│   ├── train_rlt.py                  # Script 3: Train Residual Latent Transformer
-│   └── train_angle_predictor.py      # Script 4: Train Angle Predictor
+│   ├── extract_latents.py            # Script 2: Cache Latent Vectors offline
+│   ├── generate_video.py             # Script 3: Latent interpolation & video export
+│   ├── train_rlt.py                  # Script 4: Train Residual Latent Transformer
+│   └── train_angle_predictor.py      # Script 5: Train Angle Predictor
 ├── src/
 │   └── agilab_lib/                   # Installable Python package
-│       ├── datasets/                 # Video, latent offset, and SR datasets
-│       ├── models/                   # Autoencoder, RLT, Angle Predictor, RRDN
+│       ├── datasets/                 # Video, cached latent, and SR datasets
+│       ├── models/                   # VAE, RLT, Angle Predictor, RRDN
 │       └── utils/                    # Interpolation, PCA, keyframes, metrics
-└── tests/                            # Automated PyTest suite (32 unit tests)
+└── tests/                            # Automated PyTest suite (34 unit tests)
 ```
 
 ---

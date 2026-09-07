@@ -8,13 +8,13 @@
 
 **Visual Navigation System** 是由 AGILAB 實驗室開發的視覺導航與影片表示學習研究函式庫與實驗管線。
 
-本系統透過 **Autoencoder** 將連續影像觀測壓縮為低維度的 **Latent Vector**（潛在向量），依據歐式距離門檻 **Tau ($\tau$)** 自動篩選導航地標（**Keyframe**，關鍵影格），使用以 3D **Motion Command**（運動指令）為條件的 **Residual Latent Transformer** 預測未來的潛在狀態，藉由 **RRDN** 超解析度解碼器提升重建影像畫質，並由 **Angle Predictor** 預測相對轉角控制指令以引導機器人移動。
+本系統透過 **VAE**（Variational Autoencoder）將連續影像觀測壓縮為低維度的 **Latent Vector**（潛在向量），依據歐式距離門檻 **Tau ($\tau$)** 自動篩選導航地標（**Keyframe**，關鍵影格），使用以 3D **Motion Command**（運動指令）為條件的 **Residual Latent Transformer** 預測未來的潛在狀態，藉由 **RRDN** 超解析度解碼器提升重建影像畫質，並由 **Angle Predictor** 預測相對轉角控制指令以引導機器人移動。
 
 ### 核心架構模組
 
-- **Autoencoder / VAE**：將 RGB 影像影格 $(3, 108, 192)$ 壓縮編碼為 128 維的 **Latent Vector**，並負責將潛在向量還原回影像空間。
+- **VAE**（Variational Autoencoder）：將 RGB 影像影格 $(3, 108, 192)$ 壓縮編碼為 128 維的 **Latent Vector**，透過高斯先驗正則化構建連續平滑之潛在空間，並負責將潛在向量還原回影像空間。
 - **Residual Latent Transformer**：以結合旋轉角度 $\theta$（度數）與直線位移距離 $d$（公尺）的 3D **Motion Command** 控制向量 $[\sin \theta, \cos \theta, d]$ 為條件，預測未來的 Latent Vector。
-- **RRDN** (Residual in Residual Dense Network)：增強型超解析度解碼器，提升 Latent Vector 解碼還原影像之邊緣與空間細節（參見 [ADR-0001](docs/adr/0001-rrdn-as-enhanced-decoder.md)）。
+- **RRDN** (Residual in Residual Dense Network)：增強型超解析度解碼器，提升 Latent Vector 解碼還原影像之邊緣與空間細節。
 - **Angle Predictor**：接收當前影格與目標 Keyframe 的 Latent Vector 組合，預測相對旋轉角度作為 Motion Command 控制指令。
 - **Keyframe Extraction**：沿影片軌跡計算連續影格之 Latent Vector 歐式距離，當距離大於等於 $\tau$ 時記錄關鍵影格索引。
 
@@ -53,24 +53,25 @@
 ```text
 Visual_Navigation_System/
 ├── configs/                          # Hydra YAML 組態設定檔
+│   ├── train_vae.yaml                # VAE 模型訓練設定
 │   ├── extract_keyframes.yaml        # Keyframe 提取設定
+│   ├── extract_latents.yaml          # 離線 Latent 快取設定
 │   ├── generate_video.yaml           # 影片插值生成與 RRDN 解碼設定
 │   ├── train_rlt.yaml                # Residual Latent Transformer 訓練設定
 │   └── train_angle_predictor.yaml    # Angle Predictor 訓練設定
-├── docs/                             # 架構決策記錄 (ADR)
-│   └── adr/
-│       └── 0001-rrdn-as-enhanced-decoder.md
 ├── scripts/                          # 核心管線執行腳本
+│   ├── train_vae.py                  # Script 0: 訓練 VAE 視覺表徵模型
 │   ├── extract_keyframes.py          # Script 1: 依據 Tau (τ) 提取 Keyframes
-│   ├── generate_video.py             # Script 2: Latent 插值解碼與影片匯出
-│   ├── train_rlt.py                  # Script 3: 訓練 Residual Latent Transformer
-│   └── train_angle_predictor.py      # Script 4: 訓練 Angle Predictor
+│   ├── extract_latents.py            # Script 2: 離線預先提取並快取 Latent Vectors
+│   ├── generate_video.py             # Script 3: Latent 插值解碼與影片匯出
+│   ├── train_rlt.py                  # Script 4: 訓練 Residual Latent Transformer
+│   └── train_angle_predictor.py      # Script 5: 訓練 Angle Predictor
 ├── src/
 │   └── agilab_lib/                   # 可安裝之核心 Python 函式庫
-│       ├── datasets/                 # 影片、Latent 軌跡與 SR 資料集
-│       ├── models/                   # Autoencoder, RLT, Angle Predictor, RRDN
+│       ├── datasets/                 # 影片、快取 Latent 軌跡與 SR 資料集
+│       ├── models/                   # VAE, RLT, Angle Predictor, RRDN
 │       └── utils/                    # 內插, PCA, Keyframe 提取, 評估指標
-└── tests/                            # PyTest 自動化測試套件 (32 個單元測試)
+└── tests/                            # PyTest 自動化測試套件 (34 個單元測試)
 ```
 
 ---
