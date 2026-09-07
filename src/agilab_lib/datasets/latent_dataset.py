@@ -8,7 +8,7 @@ Description: Latent trajectory datasets for Residual Latent Transformer.
 
 import random
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -409,3 +409,80 @@ class AngleDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
         latent_j = self.latent_array[j]
 
         return latent_i, torch.tensor([angle], dtype=torch.float32), latent_j
+
+
+class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+    """Dataset loading pre-extracted Latent Vector records (.pt) for motion training.
+
+    Supports 'rotation' and 'forward' motion modes with physical labels.
+    """
+
+    def __init__(
+        self,
+        cache_dir: Union[str, Path],
+        mode: str = "rotation",
+        max_frame_offset: int = 15,
+        samples_per_frame: int = 5,
+        step_distance_meters: float = 0.05,
+    ) -> None:
+        """Initialize cached latent dataset.
+
+        Args:
+            cache_dir: Directory containing cached .pt files.
+            mode: Motion mode, either 'rotation' or 'forward'.
+            max_frame_offset: Maximum frame offset between paired latents.
+            samples_per_frame: Number of target samples per base frame.
+            step_distance_meters: Distance in meters per frame offset for forward mode.
+        """
+        super().__init__()
+        self.mode: str = mode.lower()
+        self.step_distance_meters: float = step_distance_meters
+        self.records: List[Dict[str, Union[torch.Tensor, int, float, str]]] = []
+        self.pairs: List[Tuple[int, int, int]] = []
+
+        dir_path = Path(cache_dir)
+        if dir_path.exists():
+            pt_files = sorted(dir_path.rglob("*.pt"))
+            for r_idx, pf in enumerate(pt_files):
+                rec = torch.load(pf, weights_only=False)
+                if isinstance(rec, dict) and "latents" in rec:
+                    self.records.append(rec)
+                    latents = rec["latents"]
+                    num_frames = len(latents)
+                    for i in range(num_frames):
+                        for _ in range(samples_per_frame):
+                            offset = random.randint(-max_frame_offset, max_frame_offset)
+                            j = max(0, min(num_frames - 1, i + offset))
+                            self.pairs.append((r_idx, i, j))
+
+    def __len__(self) -> int:
+        """Return total sample pair count.
+
+        Returns:
+            Number of paired samples.
+        """
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Fetch start Latent Vector, target Latent Vector, and motion value tensor.
+
+        Args:
+            idx: Sample index.
+
+        Returns:
+            Tuple of (z_i, z_j, motion_value) where motion_value is shape (1,).
+        """
+        r_idx, i, j = self.pairs[idx]
+        rec = self.records[r_idx]
+        latents = rec["latents"]
+        z_i = latents[i]
+        z_j = latents[j]
+        frame_diff = j - i
+
+        if self.mode == "rotation":
+            total_frames = float(rec.get("total_frames", len(latents)))
+            angle = float(frame_diff) * (360.0 / max(total_frames, 1.0))
+            return z_i, z_j, torch.tensor([angle], dtype=torch.float32)
+        else:
+            dist = float(frame_diff) * self.step_distance_meters
+            return z_i, z_j, torch.tensor([dist], dtype=torch.float32)

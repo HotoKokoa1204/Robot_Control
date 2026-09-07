@@ -12,7 +12,10 @@ from typing import List, Tuple
 import hydra
 import torch
 import torch.nn.functional as F
-from agilab_lib.datasets.latent_dataset import DummyLatentPairDataset
+from agilab_lib.datasets.latent_dataset import (
+    CachedLatentDataset,
+    DummyLatentPairDataset,
+)
 from agilab_lib.models.angle_predictor import AnglePredictor
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
@@ -30,11 +33,23 @@ def get_dataset(
         A Dataset providing (start_latent, target_latent, angle) tuples.
     """
     data_path = Path(str(cfg.data_dir))
-    if not data_path.exists() and cfg.use_dummy_if_missing:
-        print("Data directory not found. Using DummyLatentPairDataset.")
+    if data_path.exists():
+        cached_dataset = CachedLatentDataset(cache_dir=data_path, mode="rotation")
+        if len(cached_dataset) > 0:
+            print(
+                f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
+                f"from: {data_path}"
+            )
+            return cached_dataset
+
+    if cfg.use_dummy_if_missing:
+        print(
+            "No valid cached latents found in data directory. "
+            "Using DummyLatentPairDataset."
+        )
         return DummyLatentPairDataset(num_samples=64, latent_dim=int(cfg.latent_dim))
 
-    return DummyLatentPairDataset(num_samples=64, latent_dim=int(cfg.latent_dim))
+    raise FileNotFoundError(f"No valid latent datasets found in: {data_path}")
 
 
 def run_validation_inference(

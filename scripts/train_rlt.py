@@ -13,7 +13,10 @@ from typing import Tuple
 import hydra
 import torch
 import torch.nn.functional as F
-from agilab_lib.datasets.latent_dataset import DummyLatentPairDataset
+from agilab_lib.datasets.latent_dataset import (
+    CachedLatentDataset,
+    DummyLatentPairDataset,
+)
 from agilab_lib.models.autoencoder import Autoencoder
 from agilab_lib.models.rlt import ResidualLatentTransformer
 from omegaconf import DictConfig, OmegaConf
@@ -31,14 +34,25 @@ def get_dataset(
     Returns:
         A Dataset providing (start_latent, target_latent, motion_value) tuples.
     """
-    # If real data is not present, use synthetic dummy dataset
     data_path = Path(str(cfg.data_dir))
-    if not data_path.exists() and cfg.use_dummy_if_missing:
-        print("Data directory not found. Using DummyLatentPairDataset.")
+    if data_path.exists():
+        mode = str(cfg.mode).lower()
+        cached_dataset = CachedLatentDataset(cache_dir=data_path, mode=mode)
+        if len(cached_dataset) > 0:
+            print(
+                f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
+                f"from: {data_path}"
+            )
+            return cached_dataset
+
+    if cfg.use_dummy_if_missing:
+        print(
+            "No valid cached latents found in data directory. "
+            "Using DummyLatentPairDataset."
+        )
         return DummyLatentPairDataset(num_samples=64, latent_dim=int(cfg.latent_dim))
 
-    # Fallback to dummy dataset for verification
-    return DummyLatentPairDataset(num_samples=64, latent_dim=int(cfg.latent_dim))
+    raise FileNotFoundError(f"No valid latent datasets found in: {data_path}")
 
 
 def run_validation_inference(

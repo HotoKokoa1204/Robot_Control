@@ -8,6 +8,7 @@ Description: Dataset loaders for video and latent trajectory representations.
 
 from agilab_lib.datasets.latent_dataset import (
     AngleDataset,
+    CachedLatentDataset,
     DummyLatentHorizonDataset,
     DummyLatentPairDataset,
     InMemoryLatentOffsetDataset,
@@ -32,4 +33,5 @@ __all__ = [
     "VideoLatentDataset",
     "DummyLatentHorizonDataset",
     "AngleDataset",
+    "CachedLatentDataset",
 ]
