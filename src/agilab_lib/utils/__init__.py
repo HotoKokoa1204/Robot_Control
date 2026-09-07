@@ -2,7 +2,7 @@
 Module: utils
 Stage: Library
 Author: KafuuChino
-Date: 2026-09-01
+Date: 2026-09-07
 Description: Utility package with interpolation, evaluation, and PCA tools.
 """
 
@@ -15,6 +15,7 @@ from agilab_lib.utils.interpolation import (
     interpolate_all_frames_numpy,
     linear_interpolate_latent_sequence,
 )
+from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.pca import BatchedPCA
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "evaluate_latent_prediction_mse",
     "evaluate_angle_prediction_mae",
     "decode_latents_to_frames",
+    "extract_keyframe_indices",
     "BatchedPCA",
 ]
