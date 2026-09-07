@@ -1,0 +1,166 @@
+"""
+Module: extract_latents
+Stage: Script
+Author: KafuuChino
+Date: 2026-09-07
+Description: Extract and cache Latent Vectors from videos via Autoencoder.
+"""
+
+from pathlib import Path
+from typing import Dict, List, Union
+
+import cv2
+import hydra
+import torch
+from agilab_lib.models.autoencoder import Autoencoder
+from omegaconf import DictConfig, OmegaConf
+
+
+def extract_video_latents(
+    video_path: Path,
+    model: Autoencoder,
+    device: torch.device,
+    frameskip: int = 1,
+    img_width: int = 192,
+    img_height: int = 108,
+    batch_size: int = 32,
+) -> Dict[str, Union[torch.Tensor, int, float, str]]:
+    """Extract and serialize Latent Vectors from a video file.
+
+    Args:
+        video_path: Path to video file.
+        model: Trained Autoencoder model.
+        device: Torch compute device.
+        frameskip: Frame skipping step size.
+        img_width: Frame resize width.
+        img_height: Frame resize height.
+        batch_size: Encoding batch size.
+
+    Returns:
+        Dictionary containing extracted latent tensor and metadata.
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = float(cap.get(cv2.CAP_PROP_FPS))
+
+    frames_batch: List[torch.Tensor] = []
+    latents_list: List[torch.Tensor] = []
+
+    frame_idx = 0
+    ret, frame = cap.read()
+
+    while ret:
+        if frame_idx % frameskip == 0:
+            frame_resized = cv2.resize(
+                frame, (img_width, img_height), interpolation=cv2.INTER_AREA
+            )
+            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            frame_t = torch.from_numpy(frame_rgb).float().permute(2, 0, 1) / 255.0
+            frames_batch.append(frame_t)
+
+            if len(frames_batch) >= batch_size:
+                batch_tensor = torch.stack(frames_batch).to(device)
+                with torch.no_grad():
+                    z = model.encode(batch_tensor).cpu()
+                latents_list.append(z)
+                frames_batch.clear()
+
+        frame_idx += 1
+        ret, frame = cap.read()
+
+    cap.release()
+
+    if frames_batch:
+        batch_tensor = torch.stack(frames_batch).to(device)
+        with torch.no_grad():
+            z = model.encode(batch_tensor).cpu()
+        latents_list.append(z)
+
+    cat_latents = (
+        torch.cat(latents_list, dim=0)
+        if latents_list
+        else torch.empty((0, model.latent_dim))
+    )
+
+    return {
+        "latents": cat_latents,
+        "total_frames": total_frames,
+        "fps": fps,
+        "video_name": video_path.stem,
+    }
+
+
+@hydra.main(version_base=None, config_path="../configs", config_name="extract_latents")
+def main(cfg: DictConfig) -> None:
+    """Entry point for offline Latent Vector extraction script.
+
+    Args:
+        cfg: Hydra configuration dictionary.
+    """
+    print("Executing Latent Vector offline extraction with config:")
+    print(OmegaConf.to_yaml(cfg))
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = Autoencoder(latent_dim=int(cfg.latent_dim)).to(device)
+    ae_ckpt = Path(str(cfg.ae_checkpoint))
+    if not ae_ckpt.exists():
+        raise FileNotFoundError(f"Autoencoder checkpoint not found: {ae_ckpt}")
+
+    model.load_state_dict(torch.load(ae_ckpt, map_location=device))
+    model.eval()
+    print(f"Loaded Autoencoder checkpoint from: {ae_ckpt}")
+
+    root = Path(str(cfg.data_root))
+    out_root = Path(str(cfg.output_dir))
+    video_exts = {".mp4", ".avi", ".mov", ".mkv"}
+
+    max_per_cat = (
+        int(cfg.max_videos_per_category)
+        if cfg.max_videos_per_category is not None
+        else None
+    )
+
+    for cat in cfg.categories:
+        cat_dir = root / str(cat)
+        if not cat_dir.exists():
+            continue
+
+        cat_out = out_root / str(cat)
+        cat_out.mkdir(parents=True, exist_ok=True)
+
+        cat_videos = sorted(
+            [p for p in cat_dir.rglob("*") if p.suffix.lower() in video_exts]
+        )
+        if max_per_cat is not None:
+            cat_videos = cat_videos[:max_per_cat]
+
+        print(f"\nProcessing category [{cat}]: {len(cat_videos)} videos to extract.")
+
+        for vp in cat_videos:
+            out_file = cat_out / f"{vp.stem}.pt"
+            print(f"  Encoding {vp.name} -> {out_file}...")
+            record = extract_video_latents(
+                video_path=vp,
+                model=model,
+                device=device,
+                frameskip=int(cfg.frameskip),
+                img_width=int(cfg.img_width),
+                img_height=int(cfg.img_height),
+                batch_size=int(cfg.batch_size),
+            )
+            torch.save(record, out_file)
+            print(
+                f"    Extracted {len(record['latents'])} latents of shape "
+                f"{record['latents'].shape} "
+                f"(total frames: {record['total_frames']})"
+            )
+
+    print("\nOffline Latent Vector extraction completed successfully.")
+
+
+if __name__ == "__main__":
+    main()
