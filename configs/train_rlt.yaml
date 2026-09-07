@@ -1,0 +1,21 @@
+# @package _global_
+
+# Training mode: "rotation" or "forward"
+mode: "rotation"
+
+# Model architecture settings
+latent_dim: 128
+hidden_dim: 128
+num_blocks: 5
+block_inner_dim: 128
+
+# Optimization hyperparameters
+lr: 0.001
+batch_size: 16
+max_epochs: 2
+
+# Data and checkpoint settings
+data_dir: "data"
+use_dummy_if_missing: true
+ae_checkpoint: "" # Optional Autoencoder checkpoint for inference validation
+output_checkpoint: "checkpoints/rlt_model.pt"
