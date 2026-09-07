@@ -7,5 +7,6 @@ Description: Neural network model architectures for Visual Navigation System.
 """
 
 from agilab_lib.models.autoencoder import VAE, Autoencoder
+from agilab_lib.models.rrdn import RRDN, SimpleDiscriminator
 
-__all__ = ["Autoencoder", "VAE"]
+__all__ = ["Autoencoder", "VAE", "RRDN", "SimpleDiscriminator"]
