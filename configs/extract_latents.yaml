@@ -1,7 +1,7 @@
 # @package _global_
 
-# Autoencoder model settings
-ae_checkpoint: "checkpoints/autoencoder.pt"
+# VAE model settings
+vae_checkpoint: "checkpoints/vae.pt"
 latent_dim: 128
 
 # Source videos settings

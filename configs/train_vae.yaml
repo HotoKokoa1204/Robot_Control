@@ -10,13 +10,14 @@ frameskip: 4
 img_height: 108
 img_width: 192
 
-# Model architecture settings
+# VAE model architecture settings
 latent_dim: 128
+beta_kl: 0.001
 
 # Optimization hyperparameters
 lr: 0.001
 batch_size: 16
-max_epochs: 2
+max_epochs: 5
 
 # Output checkpoint path
-output_checkpoint: "checkpoints/autoencoder.pt"
+output_checkpoint: "checkpoints/vae.pt"

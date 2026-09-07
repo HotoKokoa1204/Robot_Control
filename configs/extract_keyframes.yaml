@@ -3,9 +3,9 @@
 # Video input configuration
 video_path: "data/input_video.mp4"
 
-# Autoencoder model settings
+# VAE model settings
 latent_dim: 128
-ae_checkpoint: "" # Optional path to pretrained Autoencoder checkpoint
+vae_checkpoint: "" # Optional path to pretrained VAE checkpoint
 
 # Keyframe extraction settings
 tau: 1.5 # Euclidean distance threshold in Latent Vector space (τ)

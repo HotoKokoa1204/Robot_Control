@@ -15,5 +15,5 @@ max_epochs: 2
 # Data and checkpoint settings
 data_dir: "data"
 use_dummy_if_missing: true
-ae_checkpoint: "" # Optional Autoencoder checkpoint for feature extraction verification
+vae_checkpoint: "" # Optional VAE checkpoint for feature extraction verification
 output_checkpoint: "checkpoints/angle_predictor.pt"

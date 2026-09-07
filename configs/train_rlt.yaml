@@ -17,5 +17,5 @@ max_epochs: 2
 # Data and checkpoint settings
 data_dir: "data"
 use_dummy_if_missing: true
-ae_checkpoint: "" # Optional Autoencoder checkpoint for inference validation
+vae_checkpoint: "" # Optional VAE checkpoint for inference validation
 output_checkpoint: "checkpoints/rlt_model.pt"

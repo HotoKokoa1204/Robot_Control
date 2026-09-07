@@ -4,9 +4,9 @@
 video_path: "data/input_video.mp4"
 keyframes_json: "data/keyframes.json"
 
-# Autoencoder configuration
+# VAE configuration
 latent_dim: 128
-ae_checkpoint: "" # Optional path to pretrained Autoencoder checkpoint
+vae_checkpoint: "" # Optional path to pretrained VAE checkpoint
 
 # Interpolation configuration
 interp_steps: 10 # Number of intermediate frames inserted between keyframes
