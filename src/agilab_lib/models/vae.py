@@ -1,91 +1,41 @@
 """
-Module: autoencoder
+Module: vae
 Stage: Library
 Author: KafuuChino
 Date: 2026-09-07
-Description: Convolutional Autoencoder and VAE models for frame compression.
+Description: Variational Autoencoder (VAE) for visual representation learning.
 """
 
 from typing import Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
-class Autoencoder(nn.Module):
-    """Convolutional Autoencoder for compressing video frames into Latent Vectors."""
+def vae_loss(
+    recon_x: torch.Tensor,
+    x: torch.Tensor,
+    mu: torch.Tensor,
+    logvar: torch.Tensor,
+    beta: float = 0.001,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Calculates combined VAE loss (Reconstruction MSE + beta * KL divergence).
 
-    def __init__(self, latent_dim: int = 128) -> None:
-        """Initialize Autoencoder network.
+    Args:
+        recon_x: Reconstructed frame tensor of shape (B, 3, H, W).
+        x: Original input frame tensor of shape (B, 3, H, W).
+        mu: Latent mean vector of shape (B, latent_dim).
+        logvar: Latent log variance vector of shape (B, latent_dim).
+        beta: Weight factor for KL divergence loss term.
 
-        Args:
-            latent_dim: Dimensionality of the compressed Latent Vector.
-        """
-        super().__init__()
-        self.latent_dim = latent_dim
-
-        # Encoder: (B, 3, 108, 192) -> (B, 32, 27, 48)
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, stride=2),  # (B, 64, 54, 96)
-            nn.Conv2d(64, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, stride=2),  # (B, 32, 27, 48)
-        )
-        self.flat_dim = 32 * 27 * 48
-        self.fc1 = nn.Linear(self.flat_dim, latent_dim)
-
-        # Decoder: (B, latent_dim) -> (B, 3, 108, 192)
-        self.fc2 = nn.Linear(latent_dim, self.flat_dim)
-        self.decoder_start_shape = (32, 27, 48)
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2),  # (B, 32, 54, 96)
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(32, 64, kernel_size=2, stride=2),  # (B, 64, 108, 192)
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 3, kernel_size=3, padding=1),  # (B, 3, 108, 192)
-            nn.Sigmoid(),
-        )
-
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """Encodes an input video frame tensor into a Latent Vector.
-
-        Args:
-            x: Input frame tensor of shape (B, 3, 108, 192).
-
-        Returns:
-            Latent Vector tensor of shape (B, latent_dim).
-        """
-        h = self.encoder(x)
-        z: torch.Tensor = self.fc1(h.reshape(h.size(0), -1))
-        return z
-
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
-        """Decodes a Latent Vector back into a reconstructed video frame tensor.
-
-        Args:
-            z: Latent Vector tensor of shape (B, latent_dim).
-
-        Returns:
-            Reconstructed frame tensor of shape (B, 3, 108, 192).
-        """
-        h = self.fc2(z).reshape(-1, *self.decoder_start_shape)
-        recon: torch.Tensor = self.decoder(h)
-        return recon
-
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass through Autoencoder.
-
-        Args:
-            x: Input frame tensor of shape (B, 3, 108, 192).
-
-        Returns:
-            Tuple of (reconstructed_frame, latent_vector).
-        """
-        z = self.encode(x)
-        recon = self.decode(z)
-        return recon, z
+    Returns:
+        Tuple of (total_loss, recon_loss, kl_loss).
+    """
+    recon_loss = F.mse_loss(recon_x, x, reduction="mean")
+    kl_loss = -0.5 * torch.mean(1.0 + logvar - mu.pow(2) - logvar.exp())
+    total_loss = recon_loss + beta * kl_loss
+    return total_loss, recon_loss, kl_loss
 
 
 class VAE(nn.Module):
@@ -147,6 +97,18 @@ class VAE(nn.Module):
         mu: torch.Tensor = self.fc_mu(h_flat)
         logvar: torch.Tensor = torch.clamp(self.fc_logvar(h_flat), min=-10.0, max=10.0)
         return mu, logvar
+
+    def get_latent(self, x: torch.Tensor) -> torch.Tensor:
+        """Extracts deterministic Latent Vector (mu) for downstream navigation.
+
+        Args:
+            x: Input frame tensor of shape (B, 3, 108, 192).
+
+        Returns:
+            Mean vector mu of shape (B, latent_dim).
+        """
+        mu, _ = self.encode(x)
+        return mu
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """Applies reparameterization trick to sample latent representation.

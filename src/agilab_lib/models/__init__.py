@@ -7,16 +7,16 @@ Description: Neural network model architectures for Visual Navigation System.
 """
 
 from agilab_lib.models.angle_predictor import AnglePredictor
-from agilab_lib.models.autoencoder import VAE, Autoencoder
 from agilab_lib.models.rlt import (
     ConditionedResidualBlock,
     ResidualLatentTransformer,
 )
 from agilab_lib.models.rrdn import RRDN, SimpleDiscriminator
+from agilab_lib.models.vae import VAE, vae_loss
 
 __all__ = [
-    "Autoencoder",
     "VAE",
+    "vae_loss",
     "RRDN",
     "SimpleDiscriminator",
     "ConditionedResidualBlock",
