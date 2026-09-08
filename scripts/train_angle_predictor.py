@@ -1,5 +1,4 @@
-"""
-Module: train_angle_predictor
+"""Module: train_angle_predictor
 Stage: Script
 Author: KafuuChino
 Date: 2026-09-07
@@ -17,6 +16,7 @@ from agilab_lib.datasets.latent_dataset import (
     DummyLatentPairDataset,
 )
 from agilab_lib.models.angle_predictor import AnglePredictor
+from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
@@ -30,11 +30,13 @@ def get_dataset(
         cfg: Hydra configuration dictionary.
 
     Returns:
-        A Dataset providing (start_latent, target_latent, angle) tuples.
+        A Dataset providing (start_latent, target_latent, sin_cos) tuples.
     """
     data_path = Path(str(cfg.data_dir))
     if data_path.exists():
-        cached_dataset = CachedLatentDataset(cache_dir=data_path, mode="rotation")
+        cached_dataset = CachedLatentDataset(
+            cache_dir=data_path, mode="rotation", return_sin_cos=True
+        )
         if len(cached_dataset) > 0:
             print(
                 f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
@@ -47,7 +49,11 @@ def get_dataset(
             "No valid cached latents found in data directory. "
             "Using DummyLatentPairDataset."
         )
-        return DummyLatentPairDataset(num_samples=64, latent_dim=int(cfg.latent_dim))
+        return DummyLatentPairDataset(
+            num_samples=64,
+            latent_dim=int(cfg.latent_dim),
+            return_sin_cos=True,
+        )
 
     raise FileNotFoundError(f"No valid latent datasets found in: {data_path}")
 
@@ -70,14 +76,20 @@ def run_validation_inference(
     target_keyframe_latent = torch.randn(2, latent_dim, device=device)
 
     with torch.no_grad():
-        predicted_angles = model(
+        predicted_sin_cos = model(
+            latent1=current_latent,
+            latent2=target_keyframe_latent,
+        )
+        predicted_angles = model.predict_angle_deg(
             latent1=current_latent,
             latent2=target_keyframe_latent,
         )
 
     print(
+        f"Validation predicted [sin, cos] unit vectors:\n"
+        f"{predicted_sin_cos.cpu().tolist()}\n"
         f"Validation predicted Motion Command angles (degrees): "
-        f"{predicted_angles.squeeze(-1).tolist()}"
+        f"{predicted_angles.squeeze(-1).cpu().tolist()}"
     )
 
 
@@ -117,22 +129,31 @@ def main(cfg: DictConfig) -> None:
     model.train()
 
     for epoch in range(int(cfg.max_epochs)):
-        total_mae_loss = 0.0
-        for z_current, z_target, angle_target in loader:
+        total_mse_loss = 0.0
+        total_mae_deg = 0.0
+
+        for z_current, z_target, target_sin_cos in loader:
             z_current = z_current.to(device)
             z_target = z_target.to(device)
-            angle_target = angle_target.to(device)
+            target_sin_cos = target_sin_cos.to(device)
 
             optimizer.zero_grad()
-            angle_pred = model(z_current, z_target)
-            loss = F.l1_loss(angle_pred, angle_target)
+            pred_sin_cos = model(z_current, z_target)
+            loss = F.mse_loss(pred_sin_cos, target_sin_cos)
             loss.backward()
             optimizer.step()
 
-            total_mae_loss += loss.item()
+            total_mse_loss += loss.item()
+            total_mae_deg += evaluate_angle_prediction_mae(pred_sin_cos, target_sin_cos)
 
-        avg_mae = total_mae_loss / max(len(loader), 1)
-        print(f"Epoch {epoch + 1}/{cfg.max_epochs} - MAE Loss: {avg_mae:.4f} deg")
+        n_batches = max(len(loader), 1)
+        avg_mse = total_mse_loss / n_batches
+        avg_mae_deg = total_mae_deg / n_batches
+        print(
+            f"Epoch {epoch + 1:2d}/{cfg.max_epochs} - "
+            f"MSE Loss: {avg_mse:.6f}, "
+            f"Angular MAE: {avg_mae_deg:.2f} deg"
+        )
 
     # Validation inference step
     print("Running validation control angle inference...")

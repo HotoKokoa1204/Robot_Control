@@ -73,13 +73,32 @@ def test_evaluate_latent_prediction_mse() -> None:
 
 
 def test_evaluate_angle_prediction_mae() -> None:
-    """Test MAE loss evaluation for angle prediction."""
+    """Test MAE loss evaluation for angle prediction with 1D scalar degrees."""
     pred = torch.tensor([[10.0], [-15.0], [30.0]])
     gt = torch.tensor([[12.0], [-10.0], [25.0]])
     loss = evaluate_angle_prediction_mae(pred, gt)
     assert isinstance(loss, float)
     expected = (2.0 + 5.0 + 5.0) / 3.0
     assert pytest.approx(loss, abs=1e-5) == expected
+
+
+def test_evaluate_angle_prediction_mae_sincos() -> None:
+    """Test geodesic MAE loss evaluation with 2D sin/cos unit vectors."""
+    # Angles: 0 deg vs 30 deg (diff 30), 90 deg vs 90 deg (diff 0),
+    # -180 deg vs 180 deg (diff 0)
+    pred_angles = torch.tensor([0.0, 90.0, -180.0])
+    gt_angles = torch.tensor([30.0, 90.0, 180.0])
+
+    pred_rad = pred_angles * torch.pi / 180.0
+    gt_rad = gt_angles * torch.pi / 180.0
+
+    pred_sincos = torch.stack([torch.sin(pred_rad), torch.cos(pred_rad)], dim=-1)
+    gt_sincos = torch.stack([torch.sin(gt_rad), torch.cos(gt_rad)], dim=-1)
+
+    loss = evaluate_angle_prediction_mae(pred_sincos, gt_sincos)
+    assert isinstance(loss, float)
+    expected = (30.0 + 0.0 + 0.0) / 3.0
+    assert pytest.approx(loss, abs=1e-4) == expected
 
 
 def test_decode_latents_to_frames() -> None:

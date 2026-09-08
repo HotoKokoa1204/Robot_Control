@@ -6,6 +6,7 @@ Date: 2026-09-07
 Description: Latent trajectory datasets for Residual Latent Transformer.
 """
 
+import math
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -155,16 +156,23 @@ class DummyLatentPairDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Ten
     assets.
     """
 
-    def __init__(self, num_samples: int = 32, latent_dim: int = 128) -> None:
+    def __init__(
+        self,
+        num_samples: int = 32,
+        latent_dim: int = 128,
+        return_sin_cos: bool = False,
+    ) -> None:
         """Initialize the dummy latent pair dataset.
 
         Args:
             num_samples: Number of synthetic sample pairs to generate.
             latent_dim: Dimension of each Latent Vector.
+            return_sin_cos: Whether to return 2D [sin, cos] vector instead of 1D angle.
         """
         super().__init__()
         self.num_samples: int = num_samples
         self.latent_dim: int = latent_dim
+        self.return_sin_cos: bool = return_sin_cos
 
     def __len__(self) -> int:
         """Return the number of samples in the mock dataset.
@@ -175,19 +183,24 @@ class DummyLatentPairDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Ten
         return self.num_samples
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Generate a random Latent Vector pair and rotation angle.
+        """Generate a random Latent Vector pair and rotation target.
 
         Args:
             idx: Index of sample (unused for random generation).
 
         Returns:
-            Tuple of (z_i, z_j, angle) where z_i and z_j are (latent_dim,)
-            tensors and angle is a (1,) tensor in degrees.
+            Tuple of (z_i, z_j, target) where target is (2,) if return_sin_cos
+            else (1,) in degrees.
         """
         z_i = torch.randn(self.latent_dim, dtype=torch.float32)
-        angle = torch.tensor([random.uniform(-45.0, 45.0)], dtype=torch.float32)
         z_j = torch.randn(self.latent_dim, dtype=torch.float32)
-        return z_i, z_j, angle
+        angle_deg = random.uniform(-180.0, 180.0)
+        if self.return_sin_cos:
+            rad = angle_deg * math.pi / 180.0
+            target = torch.tensor([math.sin(rad), math.cos(rad)], dtype=torch.float32)
+        else:
+            target = torch.tensor([angle_deg], dtype=torch.float32)
+        return z_i, z_j, target
 
 
 class VideoLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
@@ -357,6 +370,7 @@ class AngleDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
         total_frames: Optional[int] = None,
         samples_per_frame: int = 10,
         max_angle: float = 15.0,
+        return_sin_cos: bool = False,
     ) -> None:
         """Initialize the angle dataset.
 
@@ -365,6 +379,7 @@ class AngleDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
             total_frames: Optional total frame count limit.
             samples_per_frame: Number of random angle targets per frame.
             max_angle: Maximum angular offset in degrees to sample.
+            return_sin_cos: Whether to return 2D [sin, cos] vector.
         """
         super().__init__()
         if isinstance(latent_array, np.ndarray):
@@ -377,6 +392,7 @@ class AngleDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
 
         self.total_frames: int = total_frames
         self.ratio: float = float(self.total_frames) / 360.0
+        self.return_sin_cos: bool = return_sin_cos
         self.data_pairs: List[Tuple[int, float]] = []
 
         for i in range(self.total_frames):
@@ -401,8 +417,8 @@ class AngleDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
             idx: Sample index.
 
         Returns:
-            Tuple of (latent_i, angle_deg, latent_j) where angle_deg has
-            shape (1,).
+            Tuple of (latent_i, target, latent_j) where target is (2,) if
+            return_sin_cos else (1,) in degrees.
         """
         i, angle = self.data_pairs[idx]
         latent_i = self.latent_array[i]
@@ -411,7 +427,13 @@ class AngleDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
         j = max(0, min(self.total_frames - 1, i + frame_offset))
         latent_j = self.latent_array[j]
 
-        return latent_i, torch.tensor([angle], dtype=torch.float32), latent_j
+        if self.return_sin_cos:
+            rad = angle * math.pi / 180.0
+            target = torch.tensor([math.sin(rad), math.cos(rad)], dtype=torch.float32)
+        else:
+            target = torch.tensor([angle], dtype=torch.float32)
+
+        return latent_i, target, latent_j
 
 
 class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
@@ -427,6 +449,7 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
         max_frame_offset: int = 15,
         samples_per_frame: int = 5,
         step_distance_meters: float = 0.05,
+        return_sin_cos: bool = False,
     ) -> None:
         """Initialize cached latent dataset.
 
@@ -436,10 +459,12 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
             max_frame_offset: Maximum frame offset between paired latents.
             samples_per_frame: Number of target samples per base frame.
             step_distance_meters: Distance in meters per frame offset for forward mode.
+            return_sin_cos: Whether to return 2D [sin, cos] vector for rotation mode.
         """
         super().__init__()
         self.mode: str = mode.lower()
         self.step_distance_meters: float = step_distance_meters
+        self.return_sin_cos: bool = return_sin_cos
         self.records: List[Dict[str, Union[torch.Tensor, int, float, str]]] = []
         self.pairs: List[Tuple[int, int, int]] = []
 
@@ -473,7 +498,8 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
             idx: Sample index.
 
         Returns:
-            Tuple of (z_i, z_j, motion_value) where motion_value is shape (1,).
+            Tuple of (z_i, z_j, motion_value) where motion_value is shape (2,)
+            if rotation mode with return_sin_cos else (1,).
         """
         r_idx, i, j = self.pairs[idx]
         rec = self.records[r_idx]
@@ -485,6 +511,10 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
         if self.mode == "rotation":
             total_frames = float(rec.get("total_frames", len(latents)))
             angle = float(frame_diff) * (360.0 / max(total_frames, 1.0))
+            if self.return_sin_cos:
+                rad = angle * math.pi / 180.0
+                sin_cos = [math.sin(rad), math.cos(rad)]
+                return z_i, z_j, torch.tensor(sin_cos, dtype=torch.float32)
             return z_i, z_j, torch.tensor([angle], dtype=torch.float32)
         else:
             dist = float(frame_diff) * self.step_distance_meters

@@ -1,5 +1,4 @@
-"""
-Module: angle_predictor
+"""Module: angle_predictor
 Stage: Library
 Author: KafuuChino
 Date: 2026-09-07
@@ -10,14 +9,15 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class AnglePredictor(nn.Module):
     """Predicts relative rotation angle between pairs of Latent Vectors.
 
     Takes a current frame Latent Vector and a target Keyframe Latent Vector,
-    concatenates them, and passes through feedforward projection layers to
-    predict the relative angle Motion Command in degrees.
+    concatenates them, passes through feedforward projection layers, and
+    applies L2 normalization to output a 2D unit vector [sin(theta), cos(theta)].
     """
 
     def __init__(
@@ -50,7 +50,8 @@ class AnglePredictor(nn.Module):
             layers.append(nn.ReLU())
             input_dim = h_dim
 
-        layers.append(nn.Linear(input_dim, 1))
+        # Final projection to 2D [sin(theta), cos(theta)]
+        layers.append(nn.Linear(input_dim, 2))
         self.network: nn.Sequential = nn.Sequential(*layers)
 
     def forward(
@@ -58,14 +59,15 @@ class AnglePredictor(nn.Module):
         latent1: torch.Tensor,
         latent2: torch.Tensor,
     ) -> torch.Tensor:
-        """Predict relative rotation angle from a pair of Latent Vectors.
+        """Predict L2-normalized 2D rotation unit vector [sin, cos].
 
         Args:
             latent1: Current frame Latent Vector of shape (B, latent_dim).
             latent2: Target Keyframe Latent Vector of shape (B, latent_dim).
 
         Returns:
-            Predicted relative angle tensor of shape (B, 1) in degrees.
+            Normalized 2D rotation vector tensor of shape (B, 2) where each
+            row satisfies sin^2 + cos^2 = 1 and values are bounded in [-1, 1].
         """
         if latent1.shape[1] != self.latent_dim:
             raise ValueError(
@@ -83,5 +85,28 @@ class AnglePredictor(nn.Module):
             )
 
         combined_latent = torch.cat((latent1, latent2), dim=1)
-        predicted_angle: torch.Tensor = self.network(combined_latent)
-        return predicted_angle
+        raw_output: torch.Tensor = self.network(combined_latent)
+        sin_cos: torch.Tensor = F.normalize(raw_output, p=2, dim=-1, eps=1e-8)
+        return sin_cos
+
+    def predict_angle_deg(
+        self,
+        latent1: torch.Tensor,
+        latent2: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict relative rotation angle in degrees from Latent Vectors.
+
+        Args:
+            latent1: Current frame Latent Vector of shape (B, latent_dim).
+            latent2: Target Keyframe Latent Vector of shape (B, latent_dim).
+
+        Returns:
+            Predicted relative angle tensor of shape (B, 1) in degrees,
+            spanning [-180.0, 180.0].
+        """
+        sin_cos = self.forward(latent1, latent2)
+        sin_val = sin_cos[:, 0]
+        cos_val = sin_cos[:, 1]
+        rad = torch.atan2(sin_val, cos_val)
+        deg = rad * (180.0 / torch.pi)
+        return deg.unsqueeze(-1)

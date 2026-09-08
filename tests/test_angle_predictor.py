@@ -1,10 +1,11 @@
-"""
-Module: test_angle_predictor
+"""Module: test_angle_predictor
 Stage: Library
 Author: KafuuChino
 Date: 2026-09-07
 Description: Unit tests for Angle Predictor model and training components.
 """
+
+import math
 
 import pytest
 import torch
@@ -13,9 +14,9 @@ from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
 
 
-def test_angle_predictor_forward_shapes() -> None:
-    """Test AnglePredictor output shape with standard batch."""
-    batch_size = 4
+def test_angle_predictor_forward_shapes_and_unit_norm() -> None:
+    """Test AnglePredictor output shape (B, 2), unit norm, and [-1, 1] range."""
+    batch_size = 8
     latent_dim = 128
     predictor = AnglePredictor(latent_dim=latent_dim, hidden_dims=[64, 32])
 
@@ -23,7 +24,15 @@ def test_angle_predictor_forward_shapes() -> None:
     z2 = torch.randn(batch_size, latent_dim)
 
     out = predictor(z1, z2)
-    assert out.shape == (batch_size, 1)
+    assert out.shape == (batch_size, 2)
+
+    # Values must be strictly bounded in [-1.0, 1.0]
+    assert torch.all(out >= -1.0)
+    assert torch.all(out <= 1.0)
+
+    # Norm along dim=-1 must be 1.0 (unit circle constraint)
+    norms = torch.linalg.norm(out, dim=-1)
+    assert torch.allclose(norms, torch.ones_like(norms), atol=1e-5)
 
 
 def test_angle_predictor_eval_single_sample() -> None:
@@ -41,7 +50,26 @@ def test_angle_predictor_eval_single_sample() -> None:
 
     with torch.no_grad():
         out = predictor(z1, z2)
-    assert out.shape == (1, 1)
+    assert out.shape == (1, 2)
+    norm = torch.linalg.norm(out, dim=-1)
+    assert torch.allclose(norm, torch.tensor([1.0]), atol=1e-5)
+
+
+def test_angle_predictor_predict_angle_deg() -> None:
+    """Test predict_angle_deg output shape (B, 1) and value bounds [-180, 180]."""
+    latent_dim = 64
+    predictor = AnglePredictor(latent_dim=latent_dim, hidden_dims=[32])
+    predictor.eval()
+
+    z1 = torch.randn(10, latent_dim)
+    z2 = torch.randn(10, latent_dim)
+
+    with torch.no_grad():
+        deg = predictor.predict_angle_deg(z1, z2)
+
+    assert deg.shape == (10, 1)
+    assert torch.all(deg >= -180.0)
+    assert torch.all(deg <= 180.0)
 
 
 def test_angle_predictor_without_batch_norm() -> None:
@@ -56,7 +84,7 @@ def test_angle_predictor_without_batch_norm() -> None:
     z2 = torch.randn(2, latent_dim)
 
     out = predictor(z1, z2)
-    assert out.shape == (2, 1)
+    assert out.shape == (2, 2)
 
 
 def test_angle_predictor_dimension_mismatch_raises_error() -> None:
@@ -76,7 +104,7 @@ def test_angle_predictor_dimension_mismatch_raises_error() -> None:
 
 
 def test_angle_predictor_single_train_step() -> None:
-    """Test single training step with gradient propagation."""
+    """Test single training step with gradient propagation on sin/cos targets."""
     latent_dim = 64
     predictor = AnglePredictor(
         latent_dim=latent_dim,
@@ -88,11 +116,14 @@ def test_angle_predictor_single_train_step() -> None:
     optimizer = torch.optim.Adam(predictor.parameters(), lr=0.01)
     z1 = torch.randn(4, latent_dim)
     z2 = torch.randn(4, latent_dim)
-    target_angle = torch.tensor([[10.0], [-20.0], [5.0], [0.0]])
+
+    target_deg = torch.tensor([10.0, -20.0, 90.0, -180.0])
+    target_rad = target_deg * math.pi / 180.0
+    target_sin_cos = torch.stack([torch.sin(target_rad), torch.cos(target_rad)], dim=-1)
 
     optimizer.zero_grad()
-    pred_angle = predictor(z1, z2)
-    loss = F.l1_loss(pred_angle, target_angle)
+    pred_sin_cos = predictor(z1, z2)
+    loss = F.mse_loss(pred_sin_cos, target_sin_cos)
     loss.backward()
     optimizer.step()
 
@@ -107,11 +138,15 @@ def test_evaluate_angle_prediction_mae_integration() -> None:
 
     z1 = torch.randn(5, 128)
     z2 = torch.randn(5, 128)
-    target = torch.randn(5, 1)
+
+    # Targets as [sin, cos]
+    angles_deg = torch.tensor([0.0, 30.0, -45.0, 90.0, -120.0])
+    rad = angles_deg * math.pi / 180.0
+    target_sin_cos = torch.stack([torch.sin(rad), torch.cos(rad)], dim=-1)
 
     with torch.no_grad():
         preds = predictor(z1, z2)
 
-    mae = evaluate_angle_prediction_mae(preds, target)
+    mae = evaluate_angle_prediction_mae(preds, target_sin_cos)
     assert isinstance(mae, float)
     assert mae >= 0.0
