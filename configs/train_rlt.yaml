@@ -10,12 +10,12 @@ num_blocks: 5
 block_inner_dim: 128
 
 # Optimization hyperparameters
-lr: 0.001
-batch_size: 16
-max_epochs: 2
+lr: 0.0005
+batch_size: 64
+max_epochs: 20
 
 # Data and checkpoint settings
-data_dir: "data"
+data_dir: "data/latents/360"
 use_dummy_if_missing: true
-vae_checkpoint: "" # Optional VAE checkpoint for inference validation
+vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for inference validation
 output_checkpoint: "checkpoints/rlt_model.pt"

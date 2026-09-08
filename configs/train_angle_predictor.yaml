@@ -8,12 +8,17 @@ hidden_dims:
 use_batch_norm: true
 
 # Optimization hyperparameters
-lr: 0.001
-batch_size: 16
-max_epochs: 2
+lr: 0.0005
+batch_size: 64
+max_epochs: 20
+
+# Loss supervision weights
+lambda_recon: 1.0
+lambda_angle: 1.0
 
 # Data and checkpoint settings
-data_dir: "data"
+data_dir: "data/latents/360"
 use_dummy_if_missing: true
-vae_checkpoint: "" # Optional VAE checkpoint for feature extraction verification
+rlt_checkpoint: "checkpoints/rlt_model.pt"
+vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for feature extraction verification
 output_checkpoint: "checkpoints/angle_predictor.pt"

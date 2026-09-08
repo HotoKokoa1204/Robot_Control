@@ -6,7 +6,7 @@ Description: Train Angle Predictor for relative robot Motion Command prediction.
 """
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import hydra
 import torch
@@ -16,6 +16,7 @@ from agilab_lib.datasets.latent_dataset import (
     DummyLatentPairDataset,
 )
 from agilab_lib.models.angle_predictor import AnglePredictor
+from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
@@ -116,6 +117,26 @@ def main(cfg: DictConfig) -> None:
         use_batch_norm=bool(cfg.use_batch_norm),
     ).to(device)
 
+    rlt_model: Optional[ResidualLatentTransformer] = None
+    rlt_path = Path(str(cfg.get("rlt_checkpoint", "checkpoints/rlt_model.pt")))
+    if rlt_path.exists():
+        print(f"Loading pre-trained RotModel (teacher) from: {rlt_path}")
+        rlt_model = ResidualLatentTransformer(
+            latent_dim=int(cfg.latent_dim),
+            hidden_dim=int(cfg.get("rlt_hidden_dim", 128)),
+            num_blocks=int(cfg.get("rlt_num_blocks", 5)),
+            block_inner_dim=int(cfg.get("rlt_block_inner_dim", 128)),
+        ).to(device)
+        rlt_model.load_state_dict(
+            torch.load(rlt_path, map_location=device, weights_only=True)
+        )
+        rlt_model.eval()
+        for p in rlt_model.parameters():
+            p.requires_grad = False
+        print("RotModel teacher loaded and frozen.")
+    else:
+        print(f"No RotModel checkpoint found at {rlt_path}. Using direct supervision.")
+
     dataset = get_dataset(cfg)
     loader = DataLoader(
         dataset,
@@ -124,12 +145,15 @@ def main(cfg: DictConfig) -> None:
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
+    lambda_recon = float(cfg.get("lambda_recon", 1.0))
+    lambda_angle = float(cfg.get("lambda_angle", 1.0))
 
     print(f"Starting Angle Predictor training on device: {device}...")
     model.train()
 
     for epoch in range(int(cfg.max_epochs)):
-        total_mse_loss = 0.0
+        total_loss_accum = 0.0
+        total_recon_accum = 0.0
         total_mae_deg = 0.0
 
         for z_current, z_target, target_sin_cos in loader:
@@ -139,21 +163,43 @@ def main(cfg: DictConfig) -> None:
 
             optimizer.zero_grad()
             pred_sin_cos = model(z_current, z_target)
-            loss = F.mse_loss(pred_sin_cos, target_sin_cos)
+
+            if rlt_model is not None:
+                # Self-supervised latent reconstruction via frozen RLT teacher
+                pred_z_target = rlt_model(z_current, sin_cos=pred_sin_cos)
+                loss_recon = F.mse_loss(pred_z_target, z_target)
+                loss_angle = F.mse_loss(pred_sin_cos, target_sin_cos)
+                loss = lambda_recon * loss_recon + lambda_angle * loss_angle
+                total_recon_accum += loss_recon.item()
+            else:
+                loss = F.mse_loss(pred_sin_cos, target_sin_cos)
+                total_recon_accum += 0.0
+
             loss.backward()
             optimizer.step()
 
-            total_mse_loss += loss.item()
+            total_loss_accum += loss.item()
             total_mae_deg += evaluate_angle_prediction_mae(pred_sin_cos, target_sin_cos)
 
         n_batches = max(len(loader), 1)
-        avg_mse = total_mse_loss / n_batches
+        avg_loss = total_loss_accum / n_batches
+        avg_recon = total_recon_accum / n_batches
         avg_mae_deg = total_mae_deg / n_batches
-        print(
-            f"Epoch {epoch + 1:2d}/{cfg.max_epochs} - "
-            f"MSE Loss: {avg_mse:.6f}, "
-            f"Angular MAE: {avg_mae_deg:.2f} deg"
-        )
+        if rlt_model is not None:
+            print(
+                f"Epoch {epoch + 1:2d}/{cfg.max_epochs} - "
+                f"Total Loss: {avg_loss:.6f}, "
+                f"Latent Recon MSE: {avg_recon:.6f}, "
+                f"Angular MAE: {avg_mae_deg:.2f} deg",
+                flush=True,
+            )
+        else:
+            print(
+                f"Epoch {epoch + 1:2d}/{cfg.max_epochs} - "
+                f"Angle MSE: {avg_loss:.6f}, "
+                f"Angular MAE: {avg_mae_deg:.2f} deg",
+                flush=True,
+            )
 
     # Validation inference step
     print("Running validation control angle inference...")

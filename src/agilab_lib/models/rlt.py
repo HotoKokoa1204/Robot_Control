@@ -7,6 +7,7 @@ Description: 3D Motion Command conditioned Residual Latent Transformer.
 """
 
 import math
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -93,24 +94,38 @@ class ResidualLatentTransformer(nn.Module):
     def forward(
         self,
         latent: torch.Tensor,
-        angle_deg: torch.Tensor,
-        distance_meters: torch.Tensor,
+        angle_deg: Optional[torch.Tensor] = None,
+        distance_meters: Optional[torch.Tensor] = None,
+        sin_cos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass predicting the transformed Latent Vector.
 
         Args:
             latent: Current Latent Vector of shape (B, latent_dim).
-            angle_deg: Rotation angle in degrees of shape (B, 1).
-            distance_meters: Linear forward distance in meters of shape (B, 1).
+            angle_deg: Optional rotation angle in degrees of shape (B, 1) or (B,).
+            distance_meters: Optional linear forward distance in meters of shape
+                (B, 1) or (B,).
+            sin_cos: Optional direct [sin, cos] unit vector tensor of shape (B, 2).
 
         Returns:
             Predicted future Latent Vector of shape (B, latent_dim).
         """
-        rad = angle_deg * math.pi / 180.0
-        cond_sin = torch.sin(rad)
-        cond_cos = torch.cos(rad)
-        cond = torch.cat([cond_sin, cond_cos, distance_meters], dim=1)
-        cond = cond.to(latent.device)
+        if distance_meters is None:
+            distance_meters = torch.zeros(latent.shape[0], 1, device=latent.device)
+        elif distance_meters.dim() == 1:
+            distance_meters = distance_meters.unsqueeze(1)
+
+        if sin_cos is None:
+            if angle_deg is None:
+                angle_deg = torch.zeros(latent.shape[0], 1, device=latent.device)
+            elif angle_deg.dim() == 1:
+                angle_deg = angle_deg.unsqueeze(1)
+            rad = angle_deg * math.pi / 180.0
+            cond_sin = torch.sin(rad)
+            cond_cos = torch.cos(rad)
+            sin_cos = torch.cat([cond_sin, cond_cos], dim=-1)
+
+        cond = torch.cat([sin_cos, distance_meters], dim=-1).to(latent.device)
 
         x = F.relu(self.fc_in(latent))
         for blk in self.blocks:

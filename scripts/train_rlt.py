@@ -37,7 +37,12 @@ def get_dataset(
     data_path = Path(str(cfg.data_dir))
     if data_path.exists():
         mode = str(cfg.mode).lower()
-        cached_dataset = CachedLatentDataset(cache_dir=data_path, mode=mode)
+        return_sin_cos = bool(
+            cfg.get("return_sin_cos", True if mode == "rotation" else False)
+        )
+        cached_dataset = CachedLatentDataset(
+            cache_dir=data_path, mode=mode, return_sin_cos=return_sin_cos
+        )
         if len(cached_dataset) > 0:
             print(
                 f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
@@ -50,7 +55,11 @@ def get_dataset(
             "No valid cached latents found in data directory. "
             "Using DummyLatentPairDataset."
         )
-        return DummyLatentPairDataset(num_samples=64, latent_dim=int(cfg.latent_dim))
+        return DummyLatentPairDataset(
+            num_samples=64,
+            latent_dim=int(cfg.latent_dim),
+            return_sin_cos=bool(cfg.get("return_sin_cos", True)),
+        )
 
     raise FileNotFoundError(f"No valid latent datasets found in: {data_path}")
 
@@ -133,25 +142,19 @@ def main(cfg: DictConfig) -> None:
             z_j = z_j.to(device)
             motion_val = motion_val.to(device)
 
+            optimizer.zero_grad()
             if mode == "rotation":
-                # Pure rotation: distance is zeroed
-                angle_deg = motion_val
-                distance_meters = torch.zeros_like(angle_deg)
+                if motion_val.shape[-1] == 2:
+                    z_pred = model(latent=z_i, sin_cos=motion_val)
+                else:
+                    z_pred = model(latent=z_i, angle_deg=motion_val)
             elif mode == "forward":
-                # Pure forward: angle is zeroed
-                distance_meters = motion_val
-                angle_deg = torch.zeros_like(distance_meters)
+                z_pred = model(latent=z_i, distance_meters=motion_val)
             else:
                 raise ValueError(
                     f"Unsupported mode: {mode}. Must be 'rotation' or 'forward'."
                 )
 
-            optimizer.zero_grad()
-            z_pred = model(
-                latent=z_i,
-                angle_deg=angle_deg,
-                distance_meters=distance_meters,
-            )
             loss = F.mse_loss(z_pred, z_j)
             loss.backward()
             optimizer.step()

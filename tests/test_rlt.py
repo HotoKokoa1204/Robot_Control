@@ -48,6 +48,26 @@ def test_rlt_pure_rotation_shape() -> None:
     assert out.shape == (4, 128)
 
 
+def test_rlt_direct_sin_cos_shape() -> None:
+    """Test ResidualLatentTransformer forward pass with direct 2D sin_cos input."""
+    model = ResidualLatentTransformer(
+        latent_dim=128,
+        hidden_dim=64,
+        num_blocks=2,
+        block_inner_dim=64,
+    )
+    z = torch.randn(4, 128)
+    sin_cos = torch.randn(4, 2)
+    # Test with distance_meters=None
+    out = model(z, sin_cos=sin_cos)
+    assert out.shape == (4, 128)
+
+    # Test with distance_meters provided
+    dist = torch.ones(4, 1)
+    out_with_dist = model(z, sin_cos=sin_cos, distance_meters=dist)
+    assert out_with_dist.shape == (4, 128)
+
+
 def test_rlt_pure_forward_shape() -> None:
     """Test ResidualLatentTransformer forward pass with pure linear forward motion."""
     model = ResidualLatentTransformer(

@@ -8,8 +8,9 @@ latent_dim: 128
 data_root: "data"
 categories:
   - "360"
-  - "one_path"
-max_videos_per_category: 2 # Set to null to extract all videos
+one_per_subfolder_categories:
+  - "360"
+max_videos_per_category: null # Set to null to extract all videos
 frameskip: 1
 img_width: 192
 img_height: 108

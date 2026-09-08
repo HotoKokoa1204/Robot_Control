@@ -11,6 +11,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 from agilab_lib.models.angle_predictor import AnglePredictor
+from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
 
 
@@ -150,3 +151,45 @@ def test_evaluate_angle_prediction_mae_integration() -> None:
     mae = evaluate_angle_prediction_mae(preds, target_sin_cos)
     assert isinstance(mae, float)
     assert mae >= 0.0
+
+
+def test_angle_predictor_self_supervised_step() -> None:
+    """Test self-supervised training step with frozen RLT teacher."""
+    latent_dim = 64
+    teacher_rlt = ResidualLatentTransformer(
+        latent_dim=latent_dim, hidden_dim=32, num_blocks=2, block_inner_dim=32
+    )
+    teacher_rlt.eval()
+    for p in teacher_rlt.parameters():
+        p.requires_grad = False
+
+    student_predictor = AnglePredictor(
+        latent_dim=latent_dim, hidden_dims=[32], use_batch_norm=False
+    )
+    student_predictor.train()
+
+    optimizer = torch.optim.Adam(student_predictor.parameters(), lr=0.01)
+
+    z1 = torch.randn(4, latent_dim)
+    z2 = torch.randn(4, latent_dim)
+
+    optimizer.zero_grad()
+    pred_sin_cos = student_predictor(z1, z2)
+    pred_z2 = teacher_rlt(z1, sin_cos=pred_sin_cos)
+    loss = F.mse_loss(pred_z2, z2)
+    loss.backward()
+
+    # Verify teacher parameters have no gradients
+    for p in teacher_rlt.parameters():
+        assert p.grad is None
+
+    # Verify student parameters have computed gradients
+    has_grad = False
+    for p in student_predictor.parameters():
+        if p.grad is not None and torch.sum(torch.abs(p.grad)) > 0:
+            has_grad = True
+            break
+    assert has_grad, "Student AnglePredictor should receive backpropagated gradients"
+
+    optimizer.step()
+    assert torch.isfinite(loss)

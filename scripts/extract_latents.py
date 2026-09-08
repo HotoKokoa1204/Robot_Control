@@ -124,6 +124,8 @@ def main(cfg: DictConfig) -> None:
         else None
     )
 
+    one_per_sub_cats = set(cfg.get("one_per_subfolder_categories", []))
+
     for cat in cfg.categories:
         cat_dir = root / str(cat)
         if not cat_dir.exists():
@@ -132,17 +134,33 @@ def main(cfg: DictConfig) -> None:
         cat_out = out_root / str(cat)
         cat_out.mkdir(parents=True, exist_ok=True)
 
-        cat_videos = sorted(
-            [p for p in cat_dir.rglob("*") if p.suffix.lower() in video_exts]
-        )
+        if str(cat) in one_per_sub_cats:
+            subdirs = sorted([d for d in cat_dir.iterdir() if d.is_dir()])
+            cat_videos: List[Path] = []
+            for d in subdirs:
+                vids = sorted(
+                    [p for p in d.rglob("*") if p.suffix.lower() in video_exts]
+                )
+                if vids:
+                    cat_videos.append(vids[0])
+        else:
+            cat_videos = sorted(
+                [p for p in cat_dir.rglob("*") if p.suffix.lower() in video_exts]
+            )
+
         if max_per_cat is not None:
             cat_videos = cat_videos[:max_per_cat]
 
         print(f"\nProcessing category [{cat}]: {len(cat_videos)} videos to extract.")
 
         for vp in cat_videos:
-            out_file = cat_out / f"{vp.stem}.pt"
-            print(f"  Encoding {vp.name} -> {out_file}...")
+            out_name = (
+                f"{vp.parent.name}_{vp.stem}.pt"
+                if vp.parent != cat_dir
+                else f"{vp.stem}.pt"
+            )
+            out_file = cat_out / out_name
+            print(f"  Encoding {vp.parent.name}/{vp.name} -> {out_file.name}...")
             record = extract_video_latents(
                 video_path=vp,
                 model=model,
