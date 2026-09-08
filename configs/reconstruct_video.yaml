@@ -1,0 +1,10 @@
+# @package _global_
+
+video_path: "data/360/A1_1/2025-07-16 00-30-14.mp4"
+vae_checkpoint: "checkpoints/vae.pt"
+latent_dim: 128
+img_width: 192
+img_height: 108
+fps: 30
+output_video: "data/reconstructed_eval_vae.mp4"
+sample_frames_dir: "data/reconstructed_samples"
