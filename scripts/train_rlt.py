@@ -48,7 +48,7 @@ def get_dataset(
                 f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
                 f"from: {data_path}"
             )
-            return cached_dataset
+            return cached_dataset.to_tensor_dataset()
 
     if cfg.use_dummy_if_missing:
         print(
@@ -127,6 +127,7 @@ def main(cfg: DictConfig) -> None:
         dataset,
         batch_size=int(cfg.batch_size),
         shuffle=True,
+        pin_memory=torch.cuda.is_available(),
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
@@ -138,9 +139,9 @@ def main(cfg: DictConfig) -> None:
     for epoch in range(int(cfg.max_epochs)):
         total_loss = 0.0
         for z_i, z_j, motion_val in loader:
-            z_i = z_i.to(device)
-            z_j = z_j.to(device)
-            motion_val = motion_val.to(device)
+            z_i = z_i.to(device, non_blocking=True)
+            z_j = z_j.to(device, non_blocking=True)
+            motion_val = motion_val.to(device, non_blocking=True)
 
             optimizer.zero_grad()
             if mode == "rotation":
@@ -162,7 +163,11 @@ def main(cfg: DictConfig) -> None:
             total_loss += loss.item()
 
         avg_loss = total_loss / max(len(loader), 1)
-        print(f"Epoch {epoch + 1}/{cfg.max_epochs} - Loss: {avg_loss:.6f}")
+        if (epoch + 1) % 5 == 0 or (epoch + 1) == int(cfg.max_epochs):
+            print(
+                f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - Loss: {avg_loss:.6f}",
+                flush=True,
+            )
 
     # Validation inference step
     print("Running validation inference...")

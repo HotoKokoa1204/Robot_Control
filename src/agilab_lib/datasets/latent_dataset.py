@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, TensorDataset
 
 
 class InMemoryLatentOffsetDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, int]]):
@@ -519,3 +519,63 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
         else:
             dist = float(frame_diff) * self.step_distance_meters
             return z_i, z_j, torch.tensor([dist], dtype=torch.float32)
+
+    def to_tensor_dataset(
+        self,
+    ) -> TensorDataset:
+        """Convert cached records and pairs into an in-memory TensorDataset.
+
+        Provides high-throughput C++ tensor slicing for multi-epoch training.
+
+        Returns:
+            TensorDataset containing (all_z_i, all_z_j, all_motion) tensors.
+        """
+        if not self.pairs:
+            dim = (
+                int(self.records[0]["latents"].shape[-1])
+                if self.records and "latents" in self.records[0]
+                else 128
+            )
+            return TensorDataset(
+                torch.empty((0, dim)),
+                torch.empty((0, dim)),
+                torch.empty((0, 2 if self.return_sin_cos else 1)),
+            )
+
+        z_i_parts: List[torch.Tensor] = []
+        z_j_parts: List[torch.Tensor] = []
+        motion_parts: List[torch.Tensor] = []
+
+        for r_idx, rec in enumerate(self.records):
+            latents = rec["latents"]
+            pairs_for_rec = [(i, j) for (r, i, j) in self.pairs if r == r_idx]
+            if not pairs_for_rec:
+                continue
+
+            idx_i = [p[0] for p in pairs_for_rec]
+            idx_j = [p[1] for p in pairs_for_rec]
+            z_i_parts.append(latents[idx_i])
+            z_j_parts.append(latents[idx_j])
+
+            diffs = torch.tensor(
+                [p[1] - p[0] for p in pairs_for_rec], dtype=torch.float32
+            )
+            if self.mode == "rotation":
+                total_frames = float(rec.get("total_frames", len(latents)))
+                angles = diffs * (360.0 / max(total_frames, 1.0))
+                if self.return_sin_cos:
+                    rads = angles * math.pi / 180.0
+                    motion_parts.append(
+                        torch.stack([torch.sin(rads), torch.cos(rads)], dim=-1)
+                    )
+                else:
+                    motion_parts.append(angles.unsqueeze(-1))
+            else:
+                dists = diffs * self.step_distance_meters
+                motion_parts.append(dists.unsqueeze(-1))
+
+        all_z_i = torch.cat(z_i_parts, dim=0)
+        all_z_j = torch.cat(z_j_parts, dim=0)
+        all_motion = torch.cat(motion_parts, dim=0)
+
+        return TensorDataset(all_z_i, all_z_j, all_motion)

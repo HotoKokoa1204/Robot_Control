@@ -11,8 +11,8 @@ block_inner_dim: 128
 
 # Optimization hyperparameters
 lr: 0.0005
-batch_size: 64
-max_epochs: 20
+batch_size: 256
+max_epochs: 100
 
 # Data and checkpoint settings
 data_dir: "data/latents/360"

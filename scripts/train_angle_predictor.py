@@ -43,7 +43,7 @@ def get_dataset(
                 f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
                 f"from: {data_path}"
             )
-            return cached_dataset
+            return cached_dataset.to_tensor_dataset()
 
     if cfg.use_dummy_if_missing:
         print(
@@ -142,6 +142,7 @@ def main(cfg: DictConfig) -> None:
         dataset,
         batch_size=int(cfg.batch_size),
         shuffle=True,
+        pin_memory=torch.cuda.is_available(),
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
@@ -157,9 +158,9 @@ def main(cfg: DictConfig) -> None:
         total_mae_deg = 0.0
 
         for z_current, z_target, target_sin_cos in loader:
-            z_current = z_current.to(device)
-            z_target = z_target.to(device)
-            target_sin_cos = target_sin_cos.to(device)
+            z_current = z_current.to(device, non_blocking=True)
+            z_target = z_target.to(device, non_blocking=True)
+            target_sin_cos = target_sin_cos.to(device, non_blocking=True)
 
             optimizer.zero_grad()
             pred_sin_cos = model(z_current, z_target)
@@ -185,21 +186,22 @@ def main(cfg: DictConfig) -> None:
         avg_loss = total_loss_accum / n_batches
         avg_recon = total_recon_accum / n_batches
         avg_mae_deg = total_mae_deg / n_batches
-        if rlt_model is not None:
-            print(
-                f"Epoch {epoch + 1:2d}/{cfg.max_epochs} - "
-                f"Total Loss: {avg_loss:.6f}, "
-                f"Latent Recon MSE: {avg_recon:.6f}, "
-                f"Angular MAE: {avg_mae_deg:.2f} deg",
-                flush=True,
-            )
-        else:
-            print(
-                f"Epoch {epoch + 1:2d}/{cfg.max_epochs} - "
-                f"Angle MSE: {avg_loss:.6f}, "
-                f"Angular MAE: {avg_mae_deg:.2f} deg",
-                flush=True,
-            )
+        if (epoch + 1) % 5 == 0 or epoch == 0 or (epoch + 1) == int(cfg.max_epochs):
+            if rlt_model is not None:
+                print(
+                    f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - "
+                    f"Total Loss: {avg_loss:.6f}, "
+                    f"Latent Recon MSE: {avg_recon:.6f}, "
+                    f"Angular MAE: {avg_mae_deg:.2f} deg",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - "
+                    f"Angle MSE: {avg_loss:.6f}, "
+                    f"Angular MAE: {avg_mae_deg:.2f} deg",
+                    flush=True,
+                )
 
     # Validation inference step
     print("Running validation control angle inference...")
