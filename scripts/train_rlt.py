@@ -40,8 +40,12 @@ def get_dataset(
         return_sin_cos = bool(
             cfg.get("return_sin_cos", True if mode == "rotation" else False)
         )
+        max_offset = cfg.get("max_frame_offset", None)
         cached_dataset = CachedLatentDataset(
-            cache_dir=data_path, mode=mode, return_sin_cos=return_sin_cos
+            cache_dir=data_path,
+            mode=mode,
+            max_frame_offset=int(max_offset) if max_offset is not None else None,
+            return_sin_cos=return_sin_cos,
         )
         if len(cached_dataset) > 0:
             print(

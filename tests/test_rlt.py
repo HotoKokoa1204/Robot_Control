@@ -6,6 +6,7 @@ Date: 2026-09-07
 Description: Unit tests for Residual Latent Transformer and latent datasets.
 """
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -191,3 +192,50 @@ def test_cached_latent_dataset_forward(tmp_path: Path) -> None:
     assert z_i.shape == (128,)
     assert z_j.shape == (128,)
     assert dist.shape == (1,)
+
+
+def test_cached_latent_dataset_calibrated_wrapping(tmp_path: Path) -> None:
+    """Test calibrated circular shortest-path angle wrapping and full-range pairs.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    total_frames = 20
+    dummy_latents = torch.randn(total_frames, 128)
+    dummy_record = {
+        "video_path": "calibrated_360.mp4",
+        "latents": dummy_latents,
+        "total_frames": total_frames,
+        "fps": 60.0,
+    }
+    torch.save(dummy_record, tmp_path / "calibrated_sample.pt")
+
+    # When max_frame_offset is None, pairs span the full rotation
+    dataset = CachedLatentDataset(
+        cache_dir=tmp_path,
+        mode="rotation",
+        max_frame_offset=None,
+        samples_per_frame=4,
+        return_sin_cos=True,
+    )
+    assert len(dataset) == total_frames * 4
+
+    tensor_ds = dataset.to_tensor_dataset()
+    assert len(tensor_ds) == len(dataset)
+
+    # Check all samples
+    for i in range(len(dataset)):
+        _, _, sc = dataset[i]
+        assert sc.shape == (2,)
+        norm = torch.norm(sc, p=2).item()
+        assert abs(norm - 1.0) < 1e-4
+
+        # Verify angle in [-180, 180]
+        angle_deg = math.atan2(sc[0].item(), sc[1].item()) * 180.0 / math.pi
+        assert -180.0 <= angle_deg <= 180.0
+
+    # Verify tensor dataset angles match
+    _, _, all_sc = tensor_ds[:]
+    assert all_sc.shape == (len(dataset), 2)
+    norms = torch.norm(all_sc, p=2, dim=-1)
+    assert torch.all(torch.abs(norms - 1.0) < 1e-4)

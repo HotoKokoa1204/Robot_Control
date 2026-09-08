@@ -446,7 +446,7 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
         self,
         cache_dir: Union[str, Path],
         mode: str = "rotation",
-        max_frame_offset: int = 15,
+        max_frame_offset: Optional[int] = None,
         samples_per_frame: int = 5,
         step_distance_meters: float = 0.05,
         return_sin_cos: bool = False,
@@ -456,13 +456,15 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
         Args:
             cache_dir: Directory containing cached .pt files.
             mode: Motion mode, either 'rotation' or 'forward'.
-            max_frame_offset: Maximum frame offset between paired latents.
+            max_frame_offset: Maximum frame offset between paired latents. If None
+                in rotation mode, pairs cover the full trajectory (up to +-180 deg).
             samples_per_frame: Number of target samples per base frame.
             step_distance_meters: Distance in meters per frame offset for forward mode.
             return_sin_cos: Whether to return 2D [sin, cos] vector for rotation mode.
         """
         super().__init__()
         self.mode: str = mode.lower()
+        self.max_frame_offset: Optional[int] = max_frame_offset
         self.step_distance_meters: float = step_distance_meters
         self.return_sin_cos: bool = return_sin_cos
         self.records: List[Dict[str, Union[torch.Tensor, int, float, str]]] = []
@@ -477,10 +479,19 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
                     self.records.append(rec)
                     latents = rec["latents"]
                     num_frames = len(latents)
+                    half_turn = num_frames // 2
+                    effective_offset = (
+                        half_turn
+                        if max_frame_offset is None and self.mode == "rotation"
+                        else (max_frame_offset if max_frame_offset is not None else 15)
+                    )
                     for i in range(num_frames):
                         for _ in range(samples_per_frame):
-                            offset = random.randint(-max_frame_offset, max_frame_offset)
-                            j = max(0, min(num_frames - 1, i + offset))
+                            offset = random.randint(-effective_offset, effective_offset)
+                            if self.mode == "rotation" and max_frame_offset is None:
+                                j = (i + offset) % num_frames
+                            else:
+                                j = max(0, min(num_frames - 1, i + offset))
                             self.pairs.append((r_idx, i, j))
 
     def __len__(self) -> int:
@@ -510,7 +521,9 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
 
         if self.mode == "rotation":
             total_frames = float(rec.get("total_frames", len(latents)))
-            angle = float(frame_diff) * (360.0 / max(total_frames, 1.0))
+            angle_raw = float(frame_diff) * (360.0 / max(total_frames, 1.0))
+            # Circular shortest-path wrap onto [-180.0, +180.0]
+            angle = ((angle_raw + 180.0) % 360.0) - 180.0
             if self.return_sin_cos:
                 rad = angle * math.pi / 180.0
                 sin_cos = [math.sin(rad), math.cos(rad)]
@@ -562,7 +575,9 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
             )
             if self.mode == "rotation":
                 total_frames = float(rec.get("total_frames", len(latents)))
-                angles = diffs * (360.0 / max(total_frames, 1.0))
+                angles_raw = diffs * (360.0 / max(total_frames, 1.0))
+                # Circular shortest-path wrap onto [-180.0, +180.0]
+                angles = torch.remainder(angles_raw + 180.0, 360.0) - 180.0
                 if self.return_sin_cos:
                     rads = angles * math.pi / 180.0
                     motion_parts.append(

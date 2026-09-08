@@ -35,8 +35,12 @@ def get_dataset(
     """
     data_path = Path(str(cfg.data_dir))
     if data_path.exists():
+        max_offset = cfg.get("max_frame_offset", None)
         cached_dataset = CachedLatentDataset(
-            cache_dir=data_path, mode="rotation", return_sin_cos=True
+            cache_dir=data_path,
+            mode="rotation",
+            max_frame_offset=int(max_offset) if max_offset is not None else None,
+            return_sin_cos=True,
         )
         if len(cached_dataset) > 0:
             print(
