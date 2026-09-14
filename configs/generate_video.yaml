@@ -20,3 +20,11 @@ rrdn_upscale_factor: 2
 output_video: "data/generated_video.mp4"
 fps: 30
 use_dummy_if_missing: true
+
+# Chained Latent Transformer configuration
+use_chained_transformer: false
+rotation_checkpoint: "" # Optional path to pretrained RotationLatentTransformer
+forward_checkpoint: "" # Optional path to pretrained ForwardLatentTransformer
+execution_order: "rotate_first" # "rotate_first" or "forward_first"
+motion_angle_deg: 0.0 # Rotation angle condition in degrees
+motion_distance_meters: 0.0 # Forward distance condition in meters

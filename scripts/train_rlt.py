@@ -12,12 +12,17 @@ from typing import Tuple
 
 import hydra
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from agilab_lib.datasets.latent_dataset import (
     CachedLatentDataset,
     DummyLatentPairDataset,
 )
-from agilab_lib.models.rlt import ResidualLatentTransformer
+from agilab_lib.models.rlt import (
+    ForwardLatentTransformer,
+    ResidualLatentTransformer,
+    RotationLatentTransformer,
+)
 from agilab_lib.models.vae import VAE
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
@@ -34,25 +39,27 @@ def get_dataset(
     Returns:
         A Dataset providing (start_latent, target_latent, motion_value) tuples.
     """
-    data_path = Path(str(cfg.data_dir))
-    if data_path.exists():
-        mode = str(cfg.mode).lower()
-        return_sin_cos = bool(
-            cfg.get("return_sin_cos", True if mode == "rotation" else False)
-        )
-        max_offset = cfg.get("max_frame_offset", None)
-        cached_dataset = CachedLatentDataset(
-            cache_dir=data_path,
-            mode=mode,
-            max_frame_offset=int(max_offset) if max_offset is not None else None,
-            return_sin_cos=return_sin_cos,
-        )
-        if len(cached_dataset) > 0:
-            print(
-                f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
-                f"from: {data_path}"
+    data_dir_str = str(cfg.get("data_dir", "")).strip()
+    if data_dir_str:
+        data_path = Path(data_dir_str)
+        if data_path.exists():
+            mode = str(cfg.mode).lower()
+            return_sin_cos = bool(
+                cfg.get("return_sin_cos", True if mode == "rotation" else False)
             )
-            return cached_dataset.to_tensor_dataset()
+            max_offset = cfg.get("max_frame_offset", None)
+            cached_dataset = CachedLatentDataset(
+                cache_dir=data_path,
+                mode=mode,
+                max_frame_offset=int(max_offset) if max_offset is not None else None,
+                return_sin_cos=return_sin_cos,
+            )
+            if len(cached_dataset) > 0:
+                print(
+                    f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
+                    f"from: {data_path}"
+                )
+                return cached_dataset.to_tensor_dataset()
 
     if cfg.use_dummy_if_missing:
         print(
@@ -69,14 +76,14 @@ def get_dataset(
 
 
 def run_validation_inference(
-    model: ResidualLatentTransformer,
+    model: nn.Module,
     cfg: DictConfig,
     device: torch.device,
 ) -> None:
     """Execute a validation inference forward pass on the trained model.
 
     Args:
-        model: Trained Residual Latent Transformer model.
+        model: Trained Latent Transformer model.
         cfg: Configuration parameters.
         device: Torch compute device.
     """
@@ -88,18 +95,25 @@ def run_validation_inference(
     test_distance = torch.tensor([[1.0], [0.5]], device=device)
 
     with torch.no_grad():
-        pred_latent = model(
-            latent=dummy_latent,
-            angle_deg=test_angle,
-            distance_meters=test_distance,
-        )
+        if isinstance(model, RotationLatentTransformer):
+            pred_latent = model(latent=dummy_latent, angle_deg=test_angle)
+        elif isinstance(model, ForwardLatentTransformer):
+            pred_latent = model(latent=dummy_latent, distance_meters=test_distance)
+        else:
+            pred_latent = model(
+                latent=dummy_latent,
+                angle_deg=test_angle,
+                distance_meters=test_distance,
+            )
 
     print(f"Validation inference output Latent Vector shape: {pred_latent.shape}")
 
     # Optional VAE decoding validation if checkpoint provided
     if cfg.vae_checkpoint and os.path.exists(str(cfg.vae_checkpoint)):
         vae = VAE(latent_dim=latent_dim).to(device)
-        vae_state = torch.load(str(cfg.vae_checkpoint), map_location=device)
+        vae_state = torch.load(
+            str(cfg.vae_checkpoint), map_location=device, weights_only=True
+        )
         vae.load_state_dict(vae_state)
         vae.eval()
         with torch.no_grad():
@@ -118,13 +132,33 @@ def main(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    mode = str(cfg.mode).lower()
 
-    model = ResidualLatentTransformer(
-        latent_dim=int(cfg.latent_dim),
-        hidden_dim=int(cfg.hidden_dim),
-        num_blocks=int(cfg.num_blocks),
-        block_inner_dim=int(cfg.block_inner_dim),
-    ).to(device)
+    if mode == "rotation":
+        model: nn.Module = RotationLatentTransformer(
+            latent_dim=int(cfg.latent_dim),
+            hidden_dim=int(cfg.hidden_dim),
+            num_blocks=int(cfg.num_blocks),
+            block_inner_dim=int(cfg.block_inner_dim),
+        ).to(device)
+    elif mode == "forward":
+        model = ForwardLatentTransformer(
+            latent_dim=int(cfg.latent_dim),
+            hidden_dim=int(cfg.hidden_dim),
+            num_blocks=int(cfg.num_blocks),
+            block_inner_dim=int(cfg.block_inner_dim),
+        ).to(device)
+    elif mode == "unified":
+        model = ResidualLatentTransformer(
+            latent_dim=int(cfg.latent_dim),
+            hidden_dim=int(cfg.hidden_dim),
+            num_blocks=int(cfg.num_blocks),
+            block_inner_dim=int(cfg.block_inner_dim),
+        ).to(device)
+    else:
+        raise ValueError(
+            f"Unsupported mode: '{mode}'. Must be 'rotation', 'forward', or 'unified'."
+        )
 
     dataset = get_dataset(cfg)
     loader = DataLoader(
@@ -135,7 +169,6 @@ def main(cfg: DictConfig) -> None:
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
-    mode = str(cfg.mode).lower()
 
     print(f"Starting training in [{mode}] mode on device: {device}...")
     model.train()
@@ -155,6 +188,12 @@ def main(cfg: DictConfig) -> None:
                     z_pred = model(latent=z_i, angle_deg=motion_val)
             elif mode == "forward":
                 z_pred = model(latent=z_i, distance_meters=motion_val)
+            elif mode == "unified":
+                z_pred = model(
+                    latent=z_i,
+                    angle_deg=motion_val[:, :1],
+                    distance_meters=motion_val[:, 1:],
+                )
             else:
                 raise ValueError(
                     f"Unsupported mode: {mode}. Must be 'rotation' or 'forward'."

@@ -18,6 +18,7 @@ from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
 )
+from agilab_lib.models.rlt import ChainedLatentTransformer
 from agilab_lib.models.rrdn import RRDN
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.interpolation import linear_interpolate_latent_sequence
@@ -65,7 +66,9 @@ def main(cfg: DictConfig) -> None:
     # 1. Initialize VAE
     vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
     if cfg.vae_checkpoint and os.path.exists(cfg.vae_checkpoint):
-        vae.load_state_dict(torch.load(cfg.vae_checkpoint, map_location=device))
+        vae.load_state_dict(
+            torch.load(cfg.vae_checkpoint, map_location=device, weights_only=True)
+        )
         print(f"Loaded VAE checkpoint: {cfg.vae_checkpoint}")
     vae.eval()
 
@@ -103,6 +106,42 @@ def main(cfg: DictConfig) -> None:
         batch_kf = torch.stack(keyframe_tensors, dim=0).to(device)
         keyframe_latents = vae.get_latent(batch_kf)
 
+    # 4b. Optional compound motion projection via ChainedLatentTransformer
+    if cfg.get("use_chained_transformer", False):
+        rot_ckpt = cfg.get("rotation_checkpoint", "") or None
+        fwd_ckpt = cfg.get("forward_checkpoint", "") or None
+        execution_order = str(cfg.get("execution_order", "rotate_first"))
+        angle_deg = float(cfg.get("motion_angle_deg", 0.0))
+        dist_m = float(cfg.get("motion_distance_meters", 0.0))
+
+        chained_model = ChainedLatentTransformer(
+            latent_dim=int(cfg.latent_dim),
+            rotation_checkpoint=(
+                rot_ckpt if rot_ckpt and os.path.exists(str(rot_ckpt)) else None
+            ),
+            forward_checkpoint=(
+                fwd_ckpt if fwd_ckpt and os.path.exists(str(fwd_ckpt)) else None
+            ),
+        ).to(device)
+        chained_model.eval()
+
+        z_start = keyframe_latents[:1]
+        with torch.no_grad():
+            res = chained_model(
+                latent=z_start,
+                angle_deg=angle_deg,
+                distance_meters=dist_m,
+                execution_order=execution_order,
+                return_intermediate=True,
+            )
+            z_final, z_intermediate = res
+        keyframe_latents = torch.cat([z_start, z_intermediate, z_final], dim=0)
+        print(
+            f"ChainedLatentTransformer generated key sequence "
+            f"with order [{execution_order}] "
+            f"(angle={angle_deg}deg, distance={dist_m}m)."
+        )
+
     # 5. Linear interpolation in Latent Vector space
     interp_latents = linear_interpolate_latent_sequence(
         keyframe_latents, interp_frames=int(cfg.interp_steps)
@@ -118,7 +157,9 @@ def main(cfg: DictConfig) -> None:
         factor = int(cfg.rrdn_upscale_factor)
         rrdn = RRDN(upscale_factor=factor).to(device)
         if cfg.rrdn_checkpoint and os.path.exists(cfg.rrdn_checkpoint):
-            rrdn.load_state_dict(torch.load(cfg.rrdn_checkpoint, map_location=device))
+            rrdn.load_state_dict(
+                torch.load(cfg.rrdn_checkpoint, map_location=device, weights_only=True)
+            )
             print(f"Loaded RRDN checkpoint: {cfg.rrdn_checkpoint}")
         rrdn.eval()
 
