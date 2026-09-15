@@ -8,7 +8,7 @@ Description: Train Residual Latent Transformer with 3D Motion Command condition.
 
 import os
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 import hydra
 import torch
@@ -181,11 +181,36 @@ def main(cfg: DictConfig) -> None:
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
 
+    use_img_loss = bool(cfg.get("use_image_loss", False))
+    img_loss_weight = float(cfg.get("image_loss_weight", 1.0))
+    vae: Optional[VAE] = None
+    vae_ckpt = cfg.get("vae_checkpoint", "")
+    if use_img_loss:
+        if vae_ckpt and os.path.exists(str(vae_ckpt)):
+            vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
+            vae.load_state_dict(
+                torch.load(str(vae_ckpt), map_location=device, weights_only=True)
+            )
+            vae.eval()
+            for param in vae.parameters():
+                param.requires_grad = False
+            print(
+                f"Loaded frozen VAE decoder from: {vae_ckpt} "
+                f"(loss weight: {img_loss_weight})"
+            )
+        else:
+            print(
+                f"Warning: use_image_loss is True but vae_checkpoint not found at: "
+                f"{vae_ckpt}. Falling back to pure latent MSE."
+            )
+
     print(f"Starting training in [{mode}] mode on device: {device}...")
     model.train()
 
     for epoch in range(int(cfg.max_epochs)):
         total_loss = 0.0
+        total_latent_loss = 0.0
+        total_img_loss = 0.0
         for z_i, z_j, motion_val in loader:
             z_i = z_i.to(device, non_blocking=True)
             z_j = z_j.to(device, non_blocking=True)
@@ -210,18 +235,39 @@ def main(cfg: DictConfig) -> None:
                     f"Unsupported mode: {mode}. Must be 'rotation' or 'forward'."
                 )
 
-            loss = F.mse_loss(z_pred, z_j)
+            loss_latent = F.mse_loss(z_pred, z_j)
+            if vae is not None and img_loss_weight > 0.0:
+                pred_img = vae.decode(z_pred)
+                with torch.no_grad():
+                    target_img = vae.decode(z_j)
+                loss_img = F.mse_loss(pred_img, target_img)
+                loss = loss_latent + img_loss_weight * loss_img
+                total_img_loss += loss_img.item()
+            else:
+                loss = loss_latent
+
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
+            total_latent_loss += loss_latent.item()
 
         avg_loss = total_loss / max(len(loader), 1)
+        avg_latent_loss = total_latent_loss / max(len(loader), 1)
+        avg_img_loss = total_img_loss / max(len(loader), 1)
         if (epoch + 1) % 5 == 0 or (epoch + 1) == int(cfg.max_epochs):
-            print(
-                f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - Loss: {avg_loss:.6f}",
-                flush=True,
-            )
+            if vae is not None and img_loss_weight > 0.0:
+                print(
+                    f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - "
+                    f"Loss: {avg_loss:.6f} "
+                    f"(latent: {avg_latent_loss:.6f}, img: {avg_img_loss:.6f})",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - Loss: {avg_loss:.6f}",
+                    flush=True,
+                )
 
     # Validation inference step
     print("Running validation inference...")

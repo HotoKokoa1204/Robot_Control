@@ -25,3 +25,7 @@ output_checkpoint: "checkpoints/rlt_model.pt"
 video_fps: 60.0
 straight_video_speed_mps: 2.5
 buffer_distance_meters: null  # set to 3.0 for forward mode with accel/decel trimming
+
+# Decoded image reconstruction loss settings
+use_image_loss: false  # set true to enable VAE decoded image MSE loss
+image_loss_weight: 1.0  # weighting factor lambda for image reconstruction MSE
