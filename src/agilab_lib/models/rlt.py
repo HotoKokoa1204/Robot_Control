@@ -438,38 +438,86 @@ class ChainedLatentTransformer(nn.Module):
                 "Must be 'rotate_first' or 'forward_first'."
             )
 
-        is_zero_dist = (
-            distance_meters is None
-            or (isinstance(distance_meters, (int, float)) and distance_meters == 0)
-            or (
-                isinstance(distance_meters, torch.Tensor)
-                and bool(torch.all(distance_meters == 0))
+        batch_size = latent.shape[0]
+
+        # 1. Per-sample zero-distance mask of shape (B, 1)
+        if distance_meters is None:
+            zero_dist_mask = torch.ones(
+                (batch_size, 1), dtype=torch.bool, device=latent.device
             )
-        )
-
-        is_zero_rot = sin_cos is None and (
-            angle_deg is None
-            or (isinstance(angle_deg, (int, float)) and angle_deg == 0)
-            or (isinstance(angle_deg, torch.Tensor) and bool(torch.all(angle_deg == 0)))
-        )
-
-        if is_zero_dist and is_zero_rot:
-            return (latent, latent) if return_intermediate else latent
-
-        if is_zero_dist:
-            z_rot = self.rotation_model(latent, angle_deg=angle_deg, sin_cos=sin_cos)
-            return (z_rot, z_rot) if return_intermediate else z_rot
-
-        if is_zero_rot:
-            z_fwd = self.forward_model(latent, distance_meters=distance_meters)
-            return (z_fwd, z_fwd) if return_intermediate else z_fwd
-
-        if execution_order == "rotate_first":
-            z_mid = self.rotation_model(latent, angle_deg=angle_deg, sin_cos=sin_cos)
-            z_out = self.forward_model(z_mid, distance_meters=distance_meters)
+        elif isinstance(distance_meters, (int, float)):
+            val = distance_meters == 0
+            zero_dist_mask = torch.full(
+                (batch_size, 1), val, dtype=torch.bool, device=latent.device
+            )
+        elif isinstance(distance_meters, torch.Tensor):
+            d_tensor = distance_meters.to(latent.device)
+            if d_tensor.dim() == 0:
+                zero_dist_mask = (d_tensor == 0).expand(batch_size, 1)
+            elif d_tensor.dim() == 1:
+                zero_dist_mask = (d_tensor == 0).unsqueeze(1)
+            else:
+                zero_dist_mask = d_tensor == 0
         else:
-            z_mid = self.forward_model(latent, distance_meters=distance_meters)
-            z_out = self.rotation_model(z_mid, angle_deg=angle_deg, sin_cos=sin_cos)
+            zero_dist_mask = torch.zeros(
+                (batch_size, 1), dtype=torch.bool, device=latent.device
+            )
+
+        # 2. Per-sample zero-rotation mask of shape (B, 1)
+        if sin_cos is not None:
+            sc = sin_cos.to(latent.device)
+            zero_rot_mask = (torch.abs(sc[..., 0:1]) < 1e-5) & (
+                torch.abs(sc[..., 1:2] - 1.0) < 1e-5
+            )
+        elif angle_deg is None:
+            zero_rot_mask = torch.ones(
+                (batch_size, 1), dtype=torch.bool, device=latent.device
+            )
+        elif isinstance(angle_deg, (int, float)):
+            val = angle_deg == 0
+            zero_rot_mask = torch.full(
+                (batch_size, 1), val, dtype=torch.bool, device=latent.device
+            )
+        elif isinstance(angle_deg, torch.Tensor):
+            a_tensor = angle_deg.to(latent.device)
+            if a_tensor.dim() == 0:
+                zero_rot_mask = (a_tensor == 0).expand(batch_size, 1)
+            elif a_tensor.dim() == 1:
+                zero_rot_mask = (a_tensor == 0).unsqueeze(1)
+            else:
+                zero_rot_mask = a_tensor == 0
+        else:
+            zero_rot_mask = torch.zeros(
+                (batch_size, 1), dtype=torch.bool, device=latent.device
+            )
+
+        # 3. Chained execution with per-sample identity invariance
+        if order_str == ExecutionOrder.ROTATE_FIRST.value:
+            if zero_rot_mask.all():
+                z_mid = latent
+            else:
+                z_mid = self.rotation_model(
+                    latent, angle_deg=angle_deg, sin_cos=sin_cos
+                )
+                z_mid = torch.where(zero_rot_mask, latent, z_mid)
+
+            if zero_dist_mask.all():
+                z_out = z_mid
+            else:
+                z_out = self.forward_model(z_mid, distance_meters=distance_meters)
+                z_out = torch.where(zero_dist_mask, z_mid, z_out)
+        else:
+            if zero_dist_mask.all():
+                z_mid = latent
+            else:
+                z_mid = self.forward_model(latent, distance_meters=distance_meters)
+                z_mid = torch.where(zero_dist_mask, latent, z_mid)
+
+            if zero_rot_mask.all():
+                z_out = z_mid
+            else:
+                z_out = self.rotation_model(z_mid, angle_deg=angle_deg, sin_cos=sin_cos)
+                z_out = torch.where(zero_rot_mask, z_mid, z_out)
 
         if return_intermediate:
             return z_out, z_mid
