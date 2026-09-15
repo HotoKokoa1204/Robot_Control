@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 import torch
 from agilab_lib.models.rlt import (
+    BaseLatentTransformer,
     ChainedLatentTransformer,
+    ExecutionOrder,
     ForwardLatentTransformer,
     RotationLatentTransformer,
 )
@@ -294,3 +296,112 @@ def test_chained_latent_transformer_checkpoint_loading(tmp_path: Path) -> None:
         rot_model(z, angle_deg=theta),
         atol=1e-6,
     )
+
+
+def test_chained_latent_transformer_mixed_batch_invariance() -> None:
+    """Verify predictions are batch-independent across mixed zero/non-zero actions."""
+    model = ChainedLatentTransformer(
+        latent_dim=64,
+        hidden_dim=32,
+        rotation_num_blocks=5,
+        forward_num_blocks=2,
+        block_inner_dim=32,
+    )
+    # Batch with mixed motion profiles:
+    # 0: pure forward (angle=0, dist=1.5)
+    # 1: pure rotation (angle=30, dist=0)
+    # 2: no motion (angle=0, dist=0)
+    # 3: compound motion (angle=45, dist=2.0)
+    z = torch.randn(4, 64)
+    angles = torch.tensor([[0.0], [30.0], [0.0], [45.0]])
+    dists = torch.tensor([[1.5], [0.0], [0.0], [2.0]])
+
+    for order in (ExecutionOrder.ROTATE_FIRST, ExecutionOrder.FORWARD_FIRST):
+        out_batch = model(
+            z,
+            angle_deg=angles,
+            distance_meters=dists,
+            execution_order=order,
+        )
+
+        for i in range(4):
+            out_isolated = model(
+                z[i : i + 1],
+                angle_deg=angles[i : i + 1],
+                distance_meters=dists[i : i + 1],
+                execution_order=order,
+            )
+            assert torch.allclose(out_batch[i : i + 1], out_isolated, atol=1e-6)
+
+
+def test_forward_first_intermediate_latent_zero_dist() -> None:
+    """Verify intermediate latent state in forward_first with zero distance."""
+    model = ChainedLatentTransformer(
+        latent_dim=64,
+        hidden_dim=32,
+        rotation_num_blocks=5,
+        forward_num_blocks=2,
+        block_inner_dim=32,
+    )
+    z = torch.randn(3, 64)
+    theta = torch.tensor([[25.0], [-15.0], [40.0]])
+    zero_dist = torch.zeros(3, 1)
+
+    out_ff, mid_ff = model(
+        z,
+        angle_deg=theta,
+        distance_meters=zero_dist,
+        execution_order=ExecutionOrder.FORWARD_FIRST,
+        return_intermediate=True,
+    )
+
+    # In forward_first when d=0, the first step (forward) produces no displacement.
+    # Therefore, mid_ff must strictly equal the starting latent z.
+    assert torch.allclose(mid_ff, z, atol=1e-6)
+    # And the final state out_ff reflects the rotation applied to z.
+    assert not torch.allclose(mid_ff, out_ff, atol=1e-3)
+
+
+def test_execution_order_enum_and_string_equivalence() -> None:
+    """Verify that ExecutionOrder Enum and string literals produce identical results."""
+    model = ChainedLatentTransformer(latent_dim=64, hidden_dim=32)
+    z = torch.randn(2, 64)
+    theta = torch.tensor([[15.0], [-20.0]])
+    dist = torch.tensor([[0.5], [1.0]])
+
+    out_enum_rf = model(
+        z,
+        angle_deg=theta,
+        distance_meters=dist,
+        execution_order=ExecutionOrder.ROTATE_FIRST,
+    )
+    out_str_rf = model(
+        z, angle_deg=theta, distance_meters=dist, execution_order="rotate_first"
+    )
+    assert torch.allclose(out_enum_rf, out_str_rf, atol=1e-6)
+
+    out_enum_ff = model(
+        z,
+        angle_deg=theta,
+        distance_meters=dist,
+        execution_order=ExecutionOrder.FORWARD_FIRST,
+    )
+    out_str_ff = model(
+        z, angle_deg=theta, distance_meters=dist, execution_order="forward_first"
+    )
+    assert torch.allclose(out_enum_ff, out_str_ff, atol=1e-6)
+
+
+def test_base_latent_transformer_shapes() -> None:
+    """Test BaseLatentTransformer directly with arbitrary conditioning dimension."""
+    base = BaseLatentTransformer(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=3,
+        block_inner_dim=32,
+        cond_dim=4,
+    )
+    x = torch.randn(3, 64)
+    cond = torch.randn(3, 4)
+    out = base._forward_blocks(x, cond)
+    assert out.shape == (3, 64)
