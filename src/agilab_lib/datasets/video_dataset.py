@@ -45,7 +45,8 @@ class VideoDataset(Dataset[torch.Tensor]):
             if not ret:
                 break
             frame_resized = cv2.resize(frame, (self.img_width, self.img_height))
-            frame_normalized = frame_resized.astype("float32") / 255.0
+            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            frame_normalized = frame_rgb.astype("float32") / 255.0
             # Convert [H, W, C] to [C, H, W]
             frame_tensor = (
                 torch.from_numpy(frame_normalized).permute(2, 0, 1).contiguous()
