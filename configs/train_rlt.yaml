@@ -20,3 +20,8 @@ max_frame_offset: null  # null defaults to full trajectory (+-180 deg) in rotati
 use_dummy_if_missing: true
 vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for inference validation
 output_checkpoint: "checkpoints/rlt_model.pt"
+
+# Speed calibration and buffer trimming (forward mode)
+video_fps: 60.0
+straight_video_speed_mps: 2.5
+buffer_distance_meters: null  # set to 3.0 for forward mode with accel/decel trimming

@@ -49,11 +49,18 @@ def get_dataset(
         mode = str(cfg.mode).lower()
         return_sin_cos = bool(cfg.get("return_sin_cos", mode == "rotation"))
         max_offset = cfg.get("max_frame_offset", None)
+        video_fps = float(cfg.get("video_fps", 60.0))
+        speed_mps = float(cfg.get("straight_video_speed_mps", 2.5))
+        buf_dist = cfg.get("buffer_distance_meters", None)
+        buf_dist_val = float(buf_dist) if buf_dist is not None else None
         cached_dataset = CachedLatentDataset(
             cache_dir=data_path,
             mode=mode,
             max_frame_offset=int(max_offset) if max_offset is not None else None,
             return_sin_cos=return_sin_cos,
+            video_fps=video_fps,
+            straight_video_speed_mps=speed_mps,
+            buffer_distance_meters=buf_dist_val,
         )
         if len(cached_dataset) > 0:
             print(
