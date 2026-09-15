@@ -135,11 +135,18 @@ def main(cfg: DictConfig) -> None:
                 return_intermediate=True,
             )
             z_final, z_intermediate = res
-        keyframe_latents = torch.cat([z_start, z_intermediate, z_final], dim=0)
+        key_latents = [z_start]
+        if not torch.allclose(z_intermediate, z_start, atol=1e-4):
+            key_latents.append(z_intermediate)
+        if not torch.allclose(z_final, key_latents[-1], atol=1e-4):
+            key_latents.append(z_final)
+        if len(key_latents) == 1:
+            key_latents.append(z_start)
+        keyframe_latents = torch.cat(key_latents, dim=0)
         print(
             f"ChainedLatentTransformer generated key sequence "
-            f"with order [{execution_order}] "
-            f"(angle={angle_deg}deg, distance={dist_m}m)."
+            f"with {len(key_latents)} keyframes (order [{execution_order}], "
+            f"angle={angle_deg}deg, distance={dist_m}m)."
         )
 
     # 5. Linear interpolation in Latent Vector space
