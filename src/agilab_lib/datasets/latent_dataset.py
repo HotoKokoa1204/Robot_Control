@@ -448,8 +448,12 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
         mode: str = "rotation",
         max_frame_offset: Optional[int] = None,
         samples_per_frame: int = 5,
-        step_distance_meters: float = 0.05,
+        step_distance_meters: Optional[float] = None,
         return_sin_cos: bool = False,
+        video_fps: float = 60.0,
+        straight_video_speed_mps: float = 2.5,
+        buffer_distance_meters: Optional[float] = None,
+        buffer_frames: Optional[int] = None,
     ) -> None:
         """Initialize cached latent dataset.
 
@@ -457,16 +461,45 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
             cache_dir: Directory containing cached .pt files.
             mode: Motion mode, either 'rotation' or 'forward'.
             max_frame_offset: Maximum frame offset between paired latents. If None
-                in rotation mode, pairs cover the full trajectory (up to +-180 deg).
+                in rotation mode, pairs cover full trajectory (up to +-180 deg);
+                in forward mode, defaults to buffer_frames or 72 frames (3.0 m).
             samples_per_frame: Number of target samples per base frame.
             step_distance_meters: Distance in meters per frame offset for forward mode.
+                If None, calculated from straight_video_speed_mps / video_fps.
             return_sin_cos: Whether to return 2D [sin, cos] vector for rotation mode.
+            video_fps: Video frame rate in frames per second.
+            straight_video_speed_mps: Robot cruise forward velocity in meters/sec.
+            buffer_distance_meters: Distance in meters to trim from head and tail
+                in forward mode to exclude acceleration and deceleration zones.
+            buffer_frames: Explicit frame count to trim from head and tail. Overrides
+                buffer_distance_meters if specified.
         """
         super().__init__()
         self.mode: str = mode.lower()
         self.max_frame_offset: Optional[int] = max_frame_offset
-        self.step_distance_meters: float = step_distance_meters
         self.return_sin_cos: bool = return_sin_cos
+        self.video_fps: float = float(video_fps)
+        self.straight_video_speed_mps: float = float(straight_video_speed_mps)
+
+        if step_distance_meters is not None:
+            self.step_distance_meters: float = float(step_distance_meters)
+        else:
+            self.step_distance_meters = self.straight_video_speed_mps / max(
+                self.video_fps, 1.0
+            )
+
+        if self.mode == "forward":
+            if buffer_frames is not None:
+                self.buffer_frames: int = max(0, int(buffer_frames))
+            elif buffer_distance_meters is not None and buffer_distance_meters > 0:
+                self.buffer_frames = int(
+                    buffer_distance_meters / self.step_distance_meters
+                )
+            else:
+                self.buffer_frames = 0
+        else:
+            self.buffer_frames = 0
+
         self.records: List[Dict[str, Union[torch.Tensor, int, float, str]]] = []
         self.pairs: List[Tuple[int, int, int]] = []
 
@@ -479,20 +512,45 @@ class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor
                     self.records.append(rec)
                     latents = rec["latents"]
                     num_frames = len(latents)
-                    half_turn = num_frames // 2
-                    effective_offset = (
-                        half_turn
-                        if max_frame_offset is None and self.mode == "rotation"
-                        else (max_frame_offset if max_frame_offset is not None else 15)
-                    )
-                    for i in range(num_frames):
-                        for _ in range(samples_per_frame):
-                            offset = random.randint(-effective_offset, effective_offset)
-                            if self.mode == "rotation" and max_frame_offset is None:
-                                j = (i + offset) % num_frames
-                            else:
-                                j = max(0, min(num_frames - 1, i + offset))
-                            self.pairs.append((r_idx, i, j))
+
+                    if self.mode == "forward" and self.buffer_frames > 0:
+                        # Forward mode with acceleration/deceleration buffer trimming
+                        buf = self.buffer_frames
+                        if num_frames <= 2 * buf:
+                            continue
+                        forward_limit = (
+                            max_frame_offset if max_frame_offset is not None else buf
+                        )
+                        start_idx = buf
+                        end_idx = num_frames - buf
+                        for i in range(start_idx, end_idx):
+                            for _ in range(samples_per_frame):
+                                max_diff = min(end_idx - 1 - i, forward_limit)
+                                if max_diff <= 0:
+                                    continue
+                                offset = random.randint(1, max_diff)
+                                j = i + offset
+                                self.pairs.append((r_idx, i, j))
+                    else:
+                        # Standard sampling (no buffer trimming)
+                        half_turn = num_frames // 2
+                        effective_offset = (
+                            half_turn
+                            if max_frame_offset is None and self.mode == "rotation"
+                            else (
+                                max_frame_offset if max_frame_offset is not None else 15
+                            )
+                        )
+                        for i in range(num_frames):
+                            for _ in range(samples_per_frame):
+                                offset = random.randint(
+                                    -effective_offset, effective_offset
+                                )
+                                if self.mode == "rotation" and max_frame_offset is None:
+                                    j = (i + offset) % num_frames
+                                else:
+                                    j = max(0, min(num_frames - 1, i + offset))
+                                self.pairs.append((r_idx, i, j))
 
     def __len__(self) -> int:
         """Return total sample pair count.
