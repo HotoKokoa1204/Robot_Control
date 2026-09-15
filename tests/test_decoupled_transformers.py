@@ -458,6 +458,57 @@ def test_chained_latent_transformer_keyframe_deduplication() -> None:
     assert not torch.allclose(kf_comp[1], kf_comp[2], atol=1e-3)
 
 
+def test_chained_latent_transformer_generate_progressive_keyframes() -> None:
+    """Test progressive keyframe generation with and without sub-stepping."""
+    model = ChainedLatentTransformer(latent_dim=64, hidden_dim=32)
+    z_start = torch.randn(1, 64)
+
+    # 1. Zero motion: generates 2 identical keyframes
+    kf_zero = model.generate_progressive_keyframes(z_start, 0.0, 0.0)
+    assert kf_zero.shape == (2, 64)
+    assert torch.allclose(kf_zero[0], kf_zero[1])
+
+    # 2. Pure rotation without substep: 2 keyframes
+    kf_rot = model.generate_progressive_keyframes(z_start, angle_deg=45.0)
+    assert kf_rot.shape == (2, 64)
+    assert not torch.allclose(kf_rot[0], kf_rot[1], atol=1e-3)
+
+    # 3. Pure forward without substep: 2 keyframes
+    kf_fwd = model.generate_progressive_keyframes(z_start, distance_meters=1.5)
+    assert kf_fwd.shape == (2, 64)
+    assert not torch.allclose(kf_fwd[0], kf_fwd[1], atol=1e-3)
+
+    # 4. Compound without substep: 3 keyframes
+    kf_comp = model.generate_progressive_keyframes(
+        z_start, angle_deg=45.0, distance_meters=1.5
+    )
+    assert kf_comp.shape == (3, 64)
+
+    # 5. Rotation 360 with substep 45: 1 + 8 = 9 keyframes
+    kf_rot_sub = model.generate_progressive_keyframes(
+        z_start, angle_deg=360.0, substep_angle_deg=45.0
+    )
+    assert kf_rot_sub.shape == (9, 64)
+
+    # 6. Forward 2.0m with substep 0.5m: 1 + 4 = 5 keyframes
+    kf_fwd_sub = model.generate_progressive_keyframes(
+        z_start, distance_meters=2.0, substep_distance_meters=0.5
+    )
+    assert kf_fwd_sub.shape == (5, 64)
+
+    # 7. Compound with substeps: 90 deg (substep 30) + 1.0m (substep 0.5)
+    # 1 + 3 (rot) + 2 (fwd) = 6 keyframes
+    kf_comp_sub = model.generate_progressive_keyframes(
+        z_start,
+        angle_deg=90.0,
+        distance_meters=1.0,
+        execution_order=ExecutionOrder.FORWARD_FIRST,
+        substep_angle_deg=30.0,
+        substep_distance_meters=0.5,
+    )
+    assert kf_comp_sub.shape == (6, 64)
+
+
 def test_cached_latent_dataset_speed_and_buffer_trimming(tmp_path: Path) -> None:
     """Test buffer trimming and physical speed calibration in CachedLatentDataset.
 

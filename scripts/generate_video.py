@@ -115,6 +115,8 @@ def main(cfg: DictConfig) -> None:
         )
         angle_deg = float(cfg.get("motion_angle_deg", 0.0))
         dist_m = float(cfg.get("motion_distance_meters", 0.0))
+        substep_angle = cfg.get("substep_angle_deg", None)
+        substep_dist = cfg.get("substep_distance_meters", None)
 
         chained_model = ChainedLatentTransformer(
             latent_dim=int(cfg.latent_dim),
@@ -128,26 +130,21 @@ def main(cfg: DictConfig) -> None:
         chained_model.eval()
 
         z_start = keyframe_latents[:1]
-        with torch.no_grad():
-            res = chained_model(
-                latent=z_start,
-                angle_deg=angle_deg,
-                distance_meters=dist_m,
-                execution_order=execution_order,
-                return_intermediate=True,
-            )
-            z_final, z_intermediate = res
-        key_latents = [z_start]
-        if not torch.allclose(z_intermediate, z_start, atol=1e-4):
-            key_latents.append(z_intermediate)
-        if not torch.allclose(z_final, key_latents[-1], atol=1e-4):
-            key_latents.append(z_final)
-        if len(key_latents) == 1:
-            key_latents.append(z_start)
-        keyframe_latents = torch.cat(key_latents, dim=0)
+        keyframe_latents = chained_model.generate_progressive_keyframes(
+            latent=z_start,
+            angle_deg=angle_deg,
+            distance_meters=dist_m,
+            execution_order=execution_order,
+            substep_angle_deg=(
+                float(substep_angle) if substep_angle is not None else None
+            ),
+            substep_distance_meters=(
+                float(substep_dist) if substep_dist is not None else None
+            ),
+        )
         print(
             f"ChainedLatentTransformer generated key sequence "
-            f"with {len(key_latents)} keyframes (order [{execution_order}], "
+            f"with {len(keyframe_latents)} keyframes (order [{execution_order}], "
             f"angle={angle_deg}deg, distance={dist_m}m)."
         )
 

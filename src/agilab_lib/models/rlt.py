@@ -9,7 +9,7 @@ Description: 3D Motion Command conditioned Residual Latent Transformer.
 import math
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -511,3 +511,79 @@ class ChainedLatentTransformer(nn.Module):
         if return_intermediate:
             return z_out, z_mid
         return z_out
+
+    def generate_progressive_keyframes(
+        self,
+        latent: torch.Tensor,
+        angle_deg: float = 0.0,
+        distance_meters: float = 0.0,
+        execution_order: Union[str, ExecutionOrder] = ExecutionOrder.ROTATE_FIRST,
+        substep_angle_deg: Optional[float] = None,
+        substep_distance_meters: Optional[float] = None,
+    ) -> torch.Tensor:
+        """Generate keyframe latents with optional progressive sub-stepping.
+
+        Subdivides large angular or linear motions into intermediate sub-steps,
+        producing a smooth trajectory of keyframe latents.
+
+        Args:
+            latent: Starting Latent Vector tensor of shape (1, latent_dim).
+            angle_deg: Total target rotation angle in degrees.
+            distance_meters: Total target forward distance in meters.
+            execution_order: Motion execution order (rotate_first or forward_first).
+            substep_angle_deg: Optional max angular step size in degrees.
+            substep_distance_meters: Optional max linear step size in meters.
+
+        Returns:
+            Tensor of shape (num_keyframes, latent_dim) with keyframe latents.
+        """
+        order_str = (
+            execution_order.value
+            if isinstance(execution_order, ExecutionOrder)
+            else str(execution_order)
+        )
+        key_latents: List[torch.Tensor] = [latent]
+        curr_z = latent
+
+        def _do_rotation(z: torch.Tensor) -> torch.Tensor:
+            if abs(angle_deg) <= 1e-4:
+                return z
+            if substep_angle_deg is not None and substep_angle_deg > 0:
+                n_steps = max(1, int(math.ceil(abs(angle_deg) / substep_angle_deg)))
+                step_a = angle_deg / n_steps
+                for _ in range(n_steps):
+                    z = self.rotation_model(z, angle_deg=step_a)
+                    key_latents.append(z)
+                return z
+            z = self.rotation_model(z, angle_deg=angle_deg)
+            key_latents.append(z)
+            return z
+
+        def _do_forward(z: torch.Tensor) -> torch.Tensor:
+            if abs(distance_meters) <= 1e-4:
+                return z
+            if substep_distance_meters is not None and substep_distance_meters > 0:
+                n_steps = max(
+                    1, int(math.ceil(abs(distance_meters) / substep_distance_meters))
+                )
+                step_d = distance_meters / n_steps
+                for _ in range(n_steps):
+                    z = self.forward_model(z, distance_meters=step_d)
+                    key_latents.append(z)
+                return z
+            z = self.forward_model(z, distance_meters=distance_meters)
+            key_latents.append(z)
+            return z
+
+        with torch.no_grad():
+            if order_str == ExecutionOrder.ROTATE_FIRST.value:
+                curr_z = _do_rotation(curr_z)
+                curr_z = _do_forward(curr_z)
+            else:
+                curr_z = _do_forward(curr_z)
+                curr_z = _do_rotation(curr_z)
+
+        if len(key_latents) == 1:
+            key_latents.append(curr_z)
+
+        return torch.cat(key_latents, dim=0)

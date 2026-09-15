@@ -28,3 +28,5 @@ forward_checkpoint: "" # Optional path to pretrained ForwardLatentTransformer
 execution_order: "rotate_first" # "rotate_first" or "forward_first"
 motion_angle_deg: 0.0 # Rotation angle condition in degrees
 motion_distance_meters: 0.0 # Forward distance condition in meters
+substep_angle_deg: null # Optional angle step for progressive subdivision (e.g. 15.0)
+substep_distance_meters: null # Optional distance step for progressive subdivision (e.g. 0.25)
