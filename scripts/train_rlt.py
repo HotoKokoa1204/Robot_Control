@@ -38,28 +38,29 @@ def get_dataset(
 
     Returns:
         A Dataset providing (start_latent, target_latent, motion_value) tuples.
+
+    Raises:
+        FileNotFoundError: If neither valid cached datasets nor dummy datasets
+            are available in the specified directory.
     """
     data_dir_str = str(cfg.get("data_dir", "")).strip()
-    if data_dir_str:
-        data_path = Path(data_dir_str)
-        if data_path.exists():
-            mode = str(cfg.mode).lower()
-            return_sin_cos = bool(
-                cfg.get("return_sin_cos", True if mode == "rotation" else False)
+    data_path: Path = Path(data_dir_str) if data_dir_str else Path(".")
+    if data_dir_str and data_path.exists():
+        mode = str(cfg.mode).lower()
+        return_sin_cos = bool(cfg.get("return_sin_cos", mode == "rotation"))
+        max_offset = cfg.get("max_frame_offset", None)
+        cached_dataset = CachedLatentDataset(
+            cache_dir=data_path,
+            mode=mode,
+            max_frame_offset=int(max_offset) if max_offset is not None else None,
+            return_sin_cos=return_sin_cos,
+        )
+        if len(cached_dataset) > 0:
+            print(
+                f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
+                f"from: {data_path}"
             )
-            max_offset = cfg.get("max_frame_offset", None)
-            cached_dataset = CachedLatentDataset(
-                cache_dir=data_path,
-                mode=mode,
-                max_frame_offset=int(max_offset) if max_offset is not None else None,
-                return_sin_cos=return_sin_cos,
-            )
-            if len(cached_dataset) > 0:
-                print(
-                    f"Loaded CachedLatentDataset with {len(cached_dataset)} pairs "
-                    f"from: {data_path}"
-                )
-                return cached_dataset.to_tensor_dataset()
+            return cached_dataset.to_tensor_dataset()
 
     if cfg.use_dummy_if_missing:
         print(
@@ -127,6 +128,9 @@ def main(cfg: DictConfig) -> None:
 
     Args:
         cfg: Hydra configuration dictionary.
+
+    Raises:
+        ValueError: If an unsupported training mode is supplied.
     """
     print("Executing Residual Latent Transformer training pipeline with config:")
     print(OmegaConf.to_yaml(cfg))
