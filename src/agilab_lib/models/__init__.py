@@ -11,6 +11,7 @@ from agilab_lib.models.rlt import (
     BaseLatentTransformer,
     ChainedLatentTransformer,
     ConditionedResidualBlock,
+    ExecutionOrder,
     ForwardLatentTransformer,
     ResidualLatentTransformer,
     RotationLatentTransformer,
@@ -29,5 +30,6 @@ __all__ = [
     "RotationLatentTransformer",
     "ForwardLatentTransformer",
     "ChainedLatentTransformer",
+    "ExecutionOrder",
     "AnglePredictor",
 ]

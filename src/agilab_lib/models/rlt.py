@@ -7,6 +7,7 @@ Description: 3D Motion Command conditioned Residual Latent Transformer.
 """
 
 import math
+from enum import Enum
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -317,6 +318,13 @@ class ForwardLatentTransformer(BaseLatentTransformer):
         return self._forward_blocks(latent, cond)
 
 
+class ExecutionOrder(str, Enum):
+    """Execution sequence order for chained latent transformation."""
+
+    ROTATE_FIRST = "rotate_first"
+    FORWARD_FIRST = "forward_first"
+
+
 class ChainedLatentTransformer(nn.Module):
     """Composite transformer executing rotation and forward models sequentially.
 
@@ -393,7 +401,7 @@ class ChainedLatentTransformer(nn.Module):
         angle_deg: Optional[Union[torch.Tensor, float]] = None,
         distance_meters: Optional[Union[torch.Tensor, float]] = None,
         sin_cos: Optional[torch.Tensor] = None,
-        execution_order: str = "rotate_first",
+        execution_order: Union[str, ExecutionOrder] = ExecutionOrder.ROTATE_FIRST,
         return_intermediate: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """Forward pass executing rotation and forward models in sequence.
@@ -403,8 +411,9 @@ class ChainedLatentTransformer(nn.Module):
             angle_deg: Optional rotation angle in degrees.
             distance_meters: Optional forward distance in meters.
             sin_cos: Optional 2D [sin, cos] unit vector tensor of shape (B, 2).
-            execution_order: Execution sequence, either "rotate_first" or
-                "forward_first".
+            execution_order: Execution sequence, either "rotate_first"
+                (ExecutionOrder.ROTATE_FIRST) or "forward_first"
+                (ExecutionOrder.FORWARD_FIRST).
             return_intermediate: If True, returns tuple of
                 (final_latent, intermediate_latent).
 
@@ -415,7 +424,15 @@ class ChainedLatentTransformer(nn.Module):
         Raises:
             ValueError: If execution_order is not 'rotate_first' or 'forward_first'.
         """
-        if execution_order not in ("rotate_first", "forward_first"):
+        order_str = (
+            execution_order.value
+            if isinstance(execution_order, ExecutionOrder)
+            else str(execution_order)
+        )
+        if order_str not in (
+            ExecutionOrder.ROTATE_FIRST.value,
+            ExecutionOrder.FORWARD_FIRST.value,
+        ):
             raise ValueError(
                 f"Unsupported execution_order: '{execution_order}'. "
                 "Must be 'rotate_first' or 'forward_first'."
