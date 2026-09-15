@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from agilab_lib.datasets.latent_dataset import CachedLatentDataset
 from agilab_lib.models.rlt import (
     BaseLatentTransformer,
     ChainedLatentTransformer,
@@ -455,3 +456,56 @@ def test_chained_latent_transformer_keyframe_deduplication() -> None:
     assert kf_comp.shape == (3, 64)
     assert not torch.allclose(kf_comp[0], kf_comp[1], atol=1e-3)
     assert not torch.allclose(kf_comp[1], kf_comp[2], atol=1e-3)
+
+
+def test_cached_latent_dataset_speed_and_buffer_trimming(tmp_path: Path) -> None:
+    """Test buffer trimming and physical speed calibration in CachedLatentDataset.
+
+    Args:
+        tmp_path: Temporary directory fixture provided by pytest.
+    """
+    latent_dim = 16
+    # 1. Short video: 100 frames (<= 2 * 72 = 144)
+    short_latents = torch.randn(100, latent_dim)
+    torch.save(
+        {"video_name": "short.mp4", "latents": short_latents},
+        tmp_path / "short.pt",
+    )
+
+    # 2. Long video: 200 frames (> 144)
+    long_latents = torch.randn(200, latent_dim)
+    torch.save(
+        {"video_name": "long.mp4", "latents": long_latents},
+        tmp_path / "long.pt",
+    )
+
+    # Instantiate dataset with 3.0m buffer at 2.5 m/s, 60 FPS
+    dataset = CachedLatentDataset(
+        cache_dir=tmp_path,
+        mode="forward",
+        video_fps=60.0,
+        straight_video_speed_mps=2.5,
+        buffer_distance_meters=3.0,
+        samples_per_frame=2,
+    )
+
+    # step_distance = 2.5 / 60.0 = 0.041666...
+    assert pytest.approx(dataset.step_distance_meters, rel=1e-4) == 2.5 / 60.0
+    assert dataset.buffer_frames == 72
+    assert len(dataset.records) == 2
+    assert len(dataset) > 0
+
+    # Verify all pairs come from the long video (index 1) and stay within [72, 128)
+    for r_idx, i, j in dataset.pairs:
+        rec_name = str(dataset.records[r_idx]["video_name"])
+        assert rec_name == "long.mp4"
+        assert 72 <= i < 128
+        assert 72 < j < 128
+        assert j > i
+        assert (j - i) <= 72
+
+    # Verify sample outputs have calibrated physical distance
+    start_z, target_z, dist = dataset[0]
+    assert start_z.shape == (latent_dim,)
+    assert target_z.shape == (latent_dim,)
+    assert dist.item() > 0.0
