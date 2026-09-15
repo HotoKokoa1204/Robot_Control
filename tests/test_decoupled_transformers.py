@@ -18,6 +18,7 @@ from agilab_lib.models.rlt import (
     ForwardLatentTransformer,
     RotationLatentTransformer,
 )
+from agilab_lib.models.vae import VAE
 
 
 def test_rotation_latent_transformer_shapes() -> None:
@@ -560,3 +561,46 @@ def test_cached_latent_dataset_speed_and_buffer_trimming(tmp_path: Path) -> None
     assert start_z.shape == (latent_dim,)
     assert target_z.shape == (latent_dim,)
     assert dist.item() > 0.0
+
+
+def test_rlt_decoded_image_loss_backpropagation() -> None:
+    """Test that VAE decoded image MSE loss backpropagates into transformer."""
+    latent_dim = 16
+    vae = VAE(latent_dim=latent_dim)
+    vae.eval()
+    for param in vae.parameters():
+        param.requires_grad = False
+
+    model = ForwardLatentTransformer(
+        latent_dim=latent_dim,
+        hidden_dim=32,
+        num_blocks=2,
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    batch_size = 2
+    z_i = torch.randn(batch_size, latent_dim)
+    z_j = torch.randn(batch_size, latent_dim)
+    dist = torch.tensor([[1.0], [2.0]])
+
+    optimizer.zero_grad()
+    z_pred = model(latent=z_i, distance_meters=dist)
+    loss_latent = torch.nn.functional.mse_loss(z_pred, z_j)
+
+    pred_img = vae.decode(z_pred)
+    with torch.no_grad():
+        target_img = vae.decode(z_j)
+    loss_img = torch.nn.functional.mse_loss(pred_img, target_img)
+
+    total_loss = loss_latent + 2.0 * loss_img
+    total_loss.backward()
+
+    # Transformer weights must receive gradients
+    has_grad = any(
+        p.grad is not None and torch.norm(p.grad).item() > 0 for p in model.parameters()
+    )
+    assert has_grad
+
+    # VAE weights must strictly remain frozen
+    for p in vae.parameters():
+        assert p.grad is None
