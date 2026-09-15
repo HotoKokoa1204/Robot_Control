@@ -405,3 +405,53 @@ def test_base_latent_transformer_shapes() -> None:
     cond = torch.randn(3, 4)
     out = base._forward_blocks(x, cond)
     assert out.shape == (3, 64)
+
+
+def test_chained_latent_transformer_keyframe_deduplication() -> None:
+    """Test keyframe deduplication logic in compound chained transformer execution."""
+    model = ChainedLatentTransformer(latent_dim=64, hidden_dim=32)
+    z_start = torch.randn(1, 64)
+
+    def assemble_keyframes(
+        angle: float, dist: float, order: str = "rotate_first"
+    ) -> torch.Tensor:
+        with torch.no_grad():
+            res = model(
+                latent=z_start,
+                angle_deg=angle,
+                distance_meters=dist,
+                execution_order=order,
+                return_intermediate=True,
+            )
+            z_final, z_intermediate = res
+        key_latents = [z_start]
+        if not torch.allclose(z_intermediate, z_start, atol=1e-4):
+            key_latents.append(z_intermediate)
+        if not torch.allclose(z_final, key_latents[-1], atol=1e-4):
+            key_latents.append(z_final)
+        if len(key_latents) == 1:
+            key_latents.append(z_start)
+        return torch.cat(key_latents, dim=0)
+
+    # 1. Zero motion: both intermediate and final are identical to start
+    kf_zero = assemble_keyframes(0.0, 0.0)
+    assert kf_zero.shape == (2, 64)
+    assert torch.allclose(kf_zero[0], kf_zero[1])
+
+    # 2. Pure rotation (dist=0.0): final is identical to intermediate
+    # This results in exactly 2 keyframes
+    kf_rot = assemble_keyframes(45.0, 0.0)
+    assert kf_rot.shape == (2, 64)
+    assert not torch.allclose(kf_rot[0], kf_rot[1], atol=1e-3)
+
+    # 3. Pure forward (angle=0.0): intermediate is identical to start
+    # This results in exactly 2 keyframes
+    kf_fwd = assemble_keyframes(0.0, 1.5)
+    assert kf_fwd.shape == (2, 64)
+    assert not torch.allclose(kf_fwd[0], kf_fwd[1], atol=1e-3)
+
+    # 4. Compound motion (angle != 0 and dist != 0): distinct 3 keyframes
+    kf_comp = assemble_keyframes(45.0, 1.5)
+    assert kf_comp.shape == (3, 64)
+    assert not torch.allclose(kf_comp[0], kf_comp[1], atol=1e-3)
+    assert not torch.allclose(kf_comp[1], kf_comp[2], atol=1e-3)

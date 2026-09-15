@@ -6,8 +6,12 @@ Date: 2026-09-07
 Description: Unit tests for Variational Autoencoder (VAE) and video datasets.
 """
 
+from pathlib import Path
+
+import cv2
+import numpy as np
 import torch
-from agilab_lib.datasets.video_dataset import DummyVideoDataset
+from agilab_lib.datasets.video_dataset import DummyVideoDataset, VideoDataset
 from agilab_lib.models.vae import VAE, vae_loss
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 
@@ -72,3 +76,27 @@ def test_extract_keyframe_indices_logic() -> None:
     assert keyframes_dense == sorted(keyframes_dense)
 
     assert extract_keyframe_indices(vae, [], tau=1.0, device=device) == []
+
+
+def test_video_dataset_rgb_loading(tmp_path: Path) -> None:
+    """Test that VideoDataset properly converts OpenCV BGR frames to RGB tensors."""
+    video_path = tmp_path / "test_rgb.mp4"
+    h, w = 108, 192
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(video_path), fourcc, 30.0, (w, h))
+
+    # Create a pure Red frame in BGR format: B=0, G=0, R=255
+    bgr_frame = np.zeros((h, w, 3), dtype=np.uint8)
+    bgr_frame[:, :, 2] = 255  # Red channel in BGR
+    for _ in range(5):
+        writer.write(bgr_frame)
+    writer.release()
+
+    dataset = VideoDataset(video_path=str(video_path), img_height=h, img_width=w)
+    assert len(dataset) == 5
+    tensor = dataset[0]
+    assert tensor.shape == (3, h, w)
+    # Channel 0 must be Red (~1.0), channel 2 must be Blue (~0.0)
+    assert tensor[0].mean().item() > 0.9
+    assert tensor[1].mean().item() < 0.1
+    assert tensor[2].mean().item() < 0.1
