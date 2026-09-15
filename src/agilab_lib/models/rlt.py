@@ -551,10 +551,17 @@ class ChainedLatentTransformer(nn.Module):
             if substep_angle_deg is not None and substep_angle_deg > 0:
                 n_steps = max(1, int(math.ceil(abs(angle_deg) / substep_angle_deg)))
                 step_a = angle_deg / n_steps
+                anchor_z = z
+                cum_a = 0.0
+                curr = z
                 for _ in range(n_steps):
-                    z = self.rotation_model(z, angle_deg=step_a)
-                    key_latents.append(z)
-                return z
+                    cum_a += step_a
+                    if abs(cum_a) > 180.0:
+                        anchor_z = curr
+                        cum_a = step_a
+                    curr = self.rotation_model(anchor_z, angle_deg=cum_a)
+                    key_latents.append(curr)
+                return curr
             z = self.rotation_model(z, angle_deg=angle_deg)
             key_latents.append(z)
             return z
@@ -567,10 +574,17 @@ class ChainedLatentTransformer(nn.Module):
                     1, int(math.ceil(abs(distance_meters) / substep_distance_meters))
                 )
                 step_d = distance_meters / n_steps
+                anchor_z = z
+                cum_d = 0.0
+                curr = z
                 for _ in range(n_steps):
-                    z = self.forward_model(z, distance_meters=step_d)
-                    key_latents.append(z)
-                return z
+                    cum_d += step_d
+                    if abs(cum_d) > 3.0:
+                        anchor_z = curr
+                        cum_d = step_d
+                    curr = self.forward_model(anchor_z, distance_meters=cum_d)
+                    key_latents.append(curr)
+                return curr
             z = self.forward_model(z, distance_meters=distance_meters)
             key_latents.append(z)
             return z
