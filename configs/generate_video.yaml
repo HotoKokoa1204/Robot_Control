@@ -1,15 +1,15 @@
 # @package _global_
 
 # Source video and keyframe metadata
-video_path: "data/input_video.mp4"
-keyframes_json: "data/keyframes.json"
+video_path: "data/360/A1_1/2025-07-16 00-30-14.mp4"
+keyframes_json: "data/keyframes_360_A1_1.json"
 
 # VAE configuration
 latent_dim: 128
 vae_checkpoint: "" # Optional path to pretrained VAE checkpoint
 
 # Interpolation configuration
-interp_steps: 10 # Number of intermediate frames inserted between keyframes
+interp_steps: 30 # Number of intermediate frames inserted between keyframes
 
 # RRDN Enhanced Decoder configuration
 use_rrdn: false # Set true to upscale frames via RRDN

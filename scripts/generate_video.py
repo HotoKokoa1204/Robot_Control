@@ -18,7 +18,7 @@ from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
 )
-from agilab_lib.models.rlt import ChainedLatentTransformer
+from agilab_lib.models.rlt import ChainedLatentTransformer, ExecutionOrder
 from agilab_lib.models.rrdn import RRDN
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.interpolation import linear_interpolate_latent_sequence
@@ -110,7 +110,9 @@ def main(cfg: DictConfig) -> None:
     if cfg.get("use_chained_transformer", False):
         rot_ckpt = cfg.get("rotation_checkpoint", "") or None
         fwd_ckpt = cfg.get("forward_checkpoint", "") or None
-        execution_order = str(cfg.get("execution_order", "rotate_first"))
+        execution_order = ExecutionOrder(
+            str(cfg.get("execution_order", "rotate_first"))
+        )
         angle_deg = float(cfg.get("motion_angle_deg", 0.0))
         dist_m = float(cfg.get("motion_distance_meters", 0.0))
 
