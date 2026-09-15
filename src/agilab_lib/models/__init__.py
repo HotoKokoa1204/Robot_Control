@@ -8,6 +8,7 @@ Description: Neural network model architectures for Visual Navigation System.
 
 from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.models.rlt import (
+    BaseLatentTransformer,
     ChainedLatentTransformer,
     ConditionedResidualBlock,
     ForwardLatentTransformer,
@@ -24,6 +25,7 @@ __all__ = [
     "SimpleDiscriminator",
     "ConditionedResidualBlock",
     "ResidualLatentTransformer",
+    "BaseLatentTransformer",
     "RotationLatentTransformer",
     "ForwardLatentTransformer",
     "ChainedLatentTransformer",

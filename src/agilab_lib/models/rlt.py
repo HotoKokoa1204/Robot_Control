@@ -136,7 +136,63 @@ class ResidualLatentTransformer(nn.Module):
         return self.fc_out(x)
 
 
-class RotationLatentTransformer(nn.Module):
+class BaseLatentTransformer(nn.Module):
+    """Base class for conditioned Residual Latent Transformers.
+
+    Encapsulates linear input projection, stacked ConditionedResidualBlock layers,
+    and output projection.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int = 128,
+        hidden_dim: int = 128,
+        num_blocks: int = 2,
+        block_inner_dim: int = 128,
+        cond_dim: int = 1,
+    ) -> None:
+        """Initialize the Base Latent Transformer.
+
+        Args:
+            latent_dim: Dimension of input and output Latent Vectors.
+            hidden_dim: Hidden dimension for feature projection.
+            num_blocks: Number of stacked ConditionedResidualBlock layers.
+            block_inner_dim: Hidden dimension inside each residual block.
+            cond_dim: Dimension of the conditioning vector.
+        """
+        super().__init__()
+        self.latent_dim: int = latent_dim
+        self.hidden_dim: int = hidden_dim
+        self.num_blocks: int = num_blocks
+        self.block_inner_dim: int = block_inner_dim
+        self.cond_dim: int = cond_dim
+
+        self.fc_in: nn.Linear = nn.Linear(latent_dim, hidden_dim)
+        self.blocks: nn.ModuleList = nn.ModuleList(
+            [
+                ConditionedResidualBlock(hidden_dim, block_inner_dim, cond_dim=cond_dim)
+                for _ in range(num_blocks)
+            ]
+        )
+        self.fc_out: nn.Linear = nn.Linear(hidden_dim, latent_dim)
+
+    def _forward_blocks(self, latent: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """Forward pass through input projection, blocks, and output projection.
+
+        Args:
+            latent: Current Latent Vector of shape (B, latent_dim).
+            cond: Conditioning tensor of shape (B, cond_dim).
+
+        Returns:
+            Transformed Latent Vector of shape (B, latent_dim).
+        """
+        x = F.relu(self.fc_in(latent))
+        for blk in self.blocks:
+            x = blk(x, cond)
+        return self.fc_out(x)
+
+
+class RotationLatentTransformer(BaseLatentTransformer):
     """Residual Latent Transformer conditioned exclusively on rotation.
 
     Predicts future Latent Vectors resulting from in-place angular rotation,
@@ -159,20 +215,13 @@ class RotationLatentTransformer(nn.Module):
             num_blocks: Number of stacked ConditionedResidualBlock layers (default 5).
             block_inner_dim: Hidden dimension inside each residual block.
         """
-        super().__init__()
-        self.latent_dim: int = latent_dim
-        self.hidden_dim: int = hidden_dim
-        self.num_blocks: int = num_blocks
-        self.block_inner_dim: int = block_inner_dim
-
-        self.fc_in: nn.Linear = nn.Linear(latent_dim, hidden_dim)
-        self.blocks: nn.ModuleList = nn.ModuleList(
-            [
-                ConditionedResidualBlock(hidden_dim, block_inner_dim, cond_dim=2)
-                for _ in range(num_blocks)
-            ]
+        super().__init__(
+            latent_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            num_blocks=num_blocks,
+            block_inner_dim=block_inner_dim,
+            cond_dim=2,
         )
-        self.fc_out: nn.Linear = nn.Linear(hidden_dim, latent_dim)
 
     def forward(
         self,
@@ -206,13 +255,10 @@ class RotationLatentTransformer(nn.Module):
             sin_cos = torch.cat([cond_sin, cond_cos], dim=-1)
 
         cond = sin_cos.to(latent.device)
-        x = F.relu(self.fc_in(latent))
-        for blk in self.blocks:
-            x = blk(x, cond)
-        return self.fc_out(x)
+        return self._forward_blocks(latent, cond)
 
 
-class ForwardLatentTransformer(nn.Module):
+class ForwardLatentTransformer(BaseLatentTransformer):
     """Lightweight Residual Latent Transformer conditioned on forward distance.
 
     Predicts future Latent Vectors resulting from linear translation along
@@ -235,20 +281,13 @@ class ForwardLatentTransformer(nn.Module):
             num_blocks: Number of stacked ConditionedResidualBlock layers (default 2).
             block_inner_dim: Hidden dimension inside each residual block.
         """
-        super().__init__()
-        self.latent_dim: int = latent_dim
-        self.hidden_dim: int = hidden_dim
-        self.num_blocks: int = num_blocks
-        self.block_inner_dim: int = block_inner_dim
-
-        self.fc_in: nn.Linear = nn.Linear(latent_dim, hidden_dim)
-        self.blocks: nn.ModuleList = nn.ModuleList(
-            [
-                ConditionedResidualBlock(hidden_dim, block_inner_dim, cond_dim=1)
-                for _ in range(num_blocks)
-            ]
+        super().__init__(
+            latent_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            num_blocks=num_blocks,
+            block_inner_dim=block_inner_dim,
+            cond_dim=1,
         )
-        self.fc_out: nn.Linear = nn.Linear(hidden_dim, latent_dim)
 
     def forward(
         self,
@@ -275,10 +314,7 @@ class ForwardLatentTransformer(nn.Module):
             distance_meters = distance_meters.unsqueeze(1)
 
         cond = distance_meters.to(latent.device)
-        x = F.relu(self.fc_in(latent))
-        for blk in self.blocks:
-            x = blk(x, cond)
-        return self.fc_out(x)
+        return self._forward_blocks(latent, cond)
 
 
 class ChainedLatentTransformer(nn.Module):
@@ -324,11 +360,7 @@ class ChainedLatentTransformer(nn.Module):
                 num_blocks=rotation_num_blocks,
                 block_inner_dim=block_inner_dim,
             )
-            if rotation_checkpoint is not None and Path(rotation_checkpoint).exists():
-                state_dict = torch.load(
-                    rotation_checkpoint, map_location="cpu", weights_only=True
-                )
-                self.rotation_model.load_state_dict(state_dict)
+            self._load_checkpoint(self.rotation_model, rotation_checkpoint)
 
         if forward_model is not None:
             self.forward_model: ForwardLatentTransformer = forward_model
@@ -339,11 +371,21 @@ class ChainedLatentTransformer(nn.Module):
                 num_blocks=forward_num_blocks,
                 block_inner_dim=block_inner_dim,
             )
-            if forward_checkpoint is not None and Path(forward_checkpoint).exists():
-                state_dict = torch.load(
-                    forward_checkpoint, map_location="cpu", weights_only=True
-                )
-                self.forward_model.load_state_dict(state_dict)
+            self._load_checkpoint(self.forward_model, forward_checkpoint)
+
+    @staticmethod
+    def _load_checkpoint(
+        model: nn.Module, checkpoint: Optional[Union[str, Path]]
+    ) -> None:
+        """Load pretrained state dictionary into a model if path exists.
+
+        Args:
+            model: PyTorch module into which weights will be loaded.
+            checkpoint: Optional file path to the checkpoint tensor.
+        """
+        if checkpoint is not None and Path(checkpoint).exists():
+            state_dict = torch.load(checkpoint, map_location="cpu", weights_only=True)
+            model.load_state_dict(state_dict)
 
     def forward(
         self,
