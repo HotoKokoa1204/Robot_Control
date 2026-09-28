@@ -14,6 +14,8 @@ import cv2
 import hydra
 import numpy as np
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
@@ -22,7 +24,6 @@ from agilab_lib.models.rlt import ChainedLatentTransformer, ExecutionOrder
 from agilab_lib.models.rrdn import RRDN
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.interpolation import linear_interpolate_latent_sequence
-from omegaconf import DictConfig, OmegaConf
 
 
 def render_frames_to_video(

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
 from agilab_lib.datasets.latent_dataset import (
     AngleDataset,
     CachedLatentDataset,
