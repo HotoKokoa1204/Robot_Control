@@ -90,6 +90,9 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
                 samples_per_video=samples_per_vid_val,
                 num_samples=num_samples_val,
                 recon_source=recon_source,
+                rotation_one_per_subfolder=bool(
+                    cfg.get("rotation_one_per_subfolder", True)
+                ),
             )
             if len(dataset) > 0:
                 print(

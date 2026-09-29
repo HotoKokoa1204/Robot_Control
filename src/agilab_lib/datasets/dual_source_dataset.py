@@ -320,6 +320,7 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
         max_videos_per_source: Optional[int] = None,
         preload_frames: bool = False,
         recon_source: str = "forward",
+        rotation_one_per_subfolder: bool = True,
         num_samples: Optional[int] = None,
         seed: Optional[int] = None,
     ) -> None:
@@ -351,6 +352,8 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                 in memory as uint8 arrays for faster iteration.
             recon_source: Modality supplying reconstruction frame ('forward',
                 'rotation', or 'random').
+            rotation_one_per_subfolder: Whether to pick at most one video per
+                immediate subfolder in the rotation directory.
             num_samples: Explicit dataset length override. If None, set to the
                 maximum of forward and rotation pair counts.
             seed: Optional random seed for deterministic sampling.
@@ -366,6 +369,7 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
         self.straight_video_speed_mps = float(straight_video_speed_mps)
         self.preload_frames = bool(preload_frames)
         self.recon_source = str(recon_source).lower()
+        self.rotation_one_per_subfolder = bool(rotation_one_per_subfolder)
 
         if step_distance_meters is not None:
             self.step_distance_meters = float(step_distance_meters)
@@ -407,7 +411,9 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
             resolved_one_path, max_videos_per_source
         )
         self.rot_video_paths = self._find_video_files(
-            resolved_rotation, max_videos_per_source
+            resolved_rotation,
+            max_videos_per_source,
+            one_per_subfolder=self.rotation_one_per_subfolder,
         )
 
         if not self.fwd_video_paths:
@@ -554,18 +560,36 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
 
     @staticmethod
     def _find_video_files(
-        directory: Path, max_videos: Optional[int] = None
+        directory: Path,
+        max_videos: Optional[int] = None,
+        one_per_subfolder: bool = False,
     ) -> List[Path]:
         """Find all supported video files recursively in the specified directory.
 
         Args:
             directory: Root directory to search.
             max_videos: Optional cap on the number of discovered video files.
+            one_per_subfolder: If True, discover subdirectories and take at
+                most one video file per subfolder.
 
         Returns:
             List of Path objects pointing to discovered video files.
         """
         video_exts = {".mp4", ".avi", ".mov", ".mkv"}
+        if one_per_subfolder:
+            subdirs = sorted([d for d in directory.iterdir() if d.is_dir()])
+            if subdirs:
+                videos: List[Path] = []
+                for d in subdirs:
+                    vids = sorted(
+                        [p for p in d.rglob("*") if p.suffix.lower() in video_exts]
+                    )
+                    if vids:
+                        videos.append(vids[0])
+                if max_videos is not None and max_videos > 0:
+                    videos = videos[:max_videos]
+                return videos
+
         videos = sorted(
             [p for p in directory.rglob("*") if p.suffix.lower() in video_exts]
         )

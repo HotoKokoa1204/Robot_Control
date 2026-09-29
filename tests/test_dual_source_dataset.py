@@ -12,14 +12,13 @@ import cv2
 import numpy as np
 import pytest
 import torch
-from torch.utils.data import DataLoader
-
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceBatch,
     DualSourceVideoDataset,
     DummyDualSourceVideoDataset,
     dual_source_collate_fn,
 )
+from torch.utils.data import DataLoader
 
 
 def _create_synthetic_video(
@@ -336,3 +335,33 @@ def test_dual_source_video_dataset_with_repo_data() -> None:
     assert batch.recon_frame.shape == (2, 3, 108, 192)
     assert batch.fwd_distance.shape == (2, 1)
     assert batch.rot_sin_cos.shape == (2, 2)
+
+
+def test_dual_source_video_dataset_one_per_subfolder(tmp_path: Path) -> None:
+    """Verify rotation_one_per_subfolder picks at most one video per subfolder."""
+    fwd_dir = tmp_path / "fwd"
+    fwd_dir.mkdir()
+    rot_dir = tmp_path / "rot"
+    rot_dir.mkdir()
+
+    (fwd_dir / "vid1.mp4").touch()
+
+    sub1 = rot_dir / "sub1"
+    sub1.mkdir()
+    (sub1 / "take1.mp4").touch()
+    (sub1 / "take2.mp4").touch()
+
+    sub2 = rot_dir / "sub2"
+    sub2.mkdir()
+    (sub2 / "take1.mp4").touch()
+    (sub2 / "take2.mp4").touch()
+
+    found_one = DualSourceVideoDataset._find_video_files(
+        rot_dir, one_per_subfolder=True
+    )
+    assert len(found_one) == 2
+
+    found_all = DualSourceVideoDataset._find_video_files(
+        rot_dir, one_per_subfolder=False
+    )
+    assert len(found_all) == 4
