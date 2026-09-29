@@ -71,8 +71,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
             )
             if len(dataset) > 0:
                 print(
-                    f"Loaded DualSourceVideoDataset with {len(dataset)} "
-                    "paired samples."
+                    f"Loaded DualSourceVideoDataset with {len(dataset)} paired samples."
                 )
                 return dataset
         except (FileNotFoundError, ValueError) as exc:
