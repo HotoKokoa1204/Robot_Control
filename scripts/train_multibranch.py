@@ -53,8 +53,12 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
         ValueError: If directories contain no videos and
             use_dummy_if_missing is False.
     """
-    one_path_dir = Path(str(cfg.get("one_path_dir", "data/one_path")))
-    rotation_dir = Path(str(cfg.get("rotation_dir", "data/360")))
+    one_path_dir = DualSourceVideoDataset._resolve_dir(
+        cfg.get("one_path_dir", "data/one_path")
+    )
+    rotation_dir = DualSourceVideoDataset._resolve_dir(
+        cfg.get("rotation_dir", "data/360")
+    )
     use_dummy = bool(cfg.get("use_dummy_if_missing", True))
     recon_source = str(cfg.get("recon_source", "random"))
 
@@ -218,7 +222,7 @@ def train_multibranch(
             and str(vae_ckpt).lower() != "none"
             and str(vae_ckpt).lower() != "null"
         ):
-            vae_path = Path(str(vae_ckpt))
+            vae_path = DualSourceVideoDataset._resolve_dir(str(vae_ckpt))
             if vae_path.exists():
                 model.load_vae_pretrained(vae_path)
                 print(f"Warm-started VAE from checkpoint: {vae_path}")
@@ -263,7 +267,9 @@ def train_multibranch(
     # 7. Training loop parameters and telemetry tracking
     max_epochs = int(cfg.get("max_epochs", 50))
     save_interval = int(cfg.get("save_interval_epochs", 5))
-    output_dir = Path(str(cfg.get("output_dir", "checkpoints")))
+    output_dir = DualSourceVideoDataset._resolve_dir(
+        cfg.get("output_dir", "checkpoints")
+    )
 
     history: Dict[str, List[float]] = {
         "loss": [],
