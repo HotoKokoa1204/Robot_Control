@@ -9,7 +9,7 @@ Description: 3D Motion Command conditioned Residual Latent Transformer.
 import math
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -326,8 +326,8 @@ class ChainedLatentTransformer(nn.Module):
         self,
         rotation_model: Optional[RotationLatentTransformer] = None,
         forward_model: Optional[ForwardLatentTransformer] = None,
-        rotation_checkpoint: Optional[Union[str, Path]] = None,
-        forward_checkpoint: Optional[Union[str, Path]] = None,
+        rotation_checkpoint: Optional[Union[str, Path, Dict[str, Any]]] = None,
+        forward_checkpoint: Optional[Union[str, Path, Dict[str, Any]]] = None,
         latent_dim: int = 128,
         hidden_dim: int = 128,
         rotation_num_blocks: int = 5,
@@ -339,8 +339,8 @@ class ChainedLatentTransformer(nn.Module):
         Args:
             rotation_model: Optional pre-constructed RotationLatentTransformer.
             forward_model: Optional pre-constructed ForwardLatentTransformer.
-            rotation_checkpoint: Optional file path to rotation model weights.
-            forward_checkpoint: Optional file path to forward model weights.
+            rotation_checkpoint: Optional file path or state dict for rotation weights.
+            forward_checkpoint: Optional file path or state dict for forward weights.
             latent_dim: Dimension of input and output Latent Vectors.
             hidden_dim: Hidden dimension for feature projection.
             rotation_num_blocks: Number of blocks for rotation model (default 5).
@@ -372,17 +372,70 @@ class ChainedLatentTransformer(nn.Module):
 
     @staticmethod
     def _load_checkpoint(
-        model: nn.Module, checkpoint: Optional[Union[str, Path]]
+        model: nn.Module,
+        checkpoint: Optional[Union[str, Path, Dict[str, Any]]],
     ) -> None:
-        """Load pretrained state dictionary into a model if path exists.
+        """Load pretrained state dictionary into a model if path or dict exists.
+
+        Handles raw state dicts, nested dictionaries (e.g., 'state_dict',
+        'model_state_dict', 'forward_state_dict', 'rotation_state_dict', 'model'),
+        and key prefix stripping ('module.', 'forward_transformer.',
+        'rotation_transformer.').
 
         Args:
             model: PyTorch module into which weights will be loaded.
-            checkpoint: Optional file path to the checkpoint tensor.
+            checkpoint: Optional file path or state dictionary tensor mapping.
         """
-        if checkpoint is not None and Path(checkpoint).exists():
-            state_dict = torch.load(checkpoint, map_location="cpu", weights_only=True)
-            model.load_state_dict(state_dict)
+        if checkpoint is None:
+            return
+
+        if isinstance(checkpoint, (str, Path)):
+            ckpt_path = Path(checkpoint)
+            if not ckpt_path.exists():
+                return
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        elif isinstance(checkpoint, dict):
+            ckpt = checkpoint
+        else:
+            return
+
+        if isinstance(ckpt, dict):
+            for candidate_key in (
+                "state_dict",
+                "model_state_dict",
+                "forward_state_dict",
+                "rotation_state_dict",
+                "model",
+            ):
+                if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
+                    ckpt = ckpt[candidate_key]
+                    break
+
+            model_keys = set(model.state_dict().keys())
+            if set(ckpt.keys()) == model_keys:
+                state_dict = ckpt
+            else:
+                target_prefix = ""
+                if isinstance(model, ForwardLatentTransformer):
+                    target_prefix = "forward_transformer."
+                elif isinstance(model, RotationLatentTransformer):
+                    target_prefix = "rotation_transformer."
+
+                cleaned_sd: Dict[str, torch.Tensor] = {}
+                for k, v in ckpt.items():
+                    key = k
+                    if key.startswith("module."):
+                        key = key[len("module.") :]
+                    if target_prefix and key.startswith(target_prefix):
+                        key = key[len(target_prefix) :]
+                    if key in model_keys:
+                        cleaned_sd[key] = v
+
+                state_dict = cleaned_sd if cleaned_sd else ckpt
+        else:
+            state_dict = ckpt
+
+        model.load_state_dict(state_dict)
 
     def forward(
         self,

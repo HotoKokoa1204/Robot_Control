@@ -8,7 +8,12 @@ Description: Reconstructs and interpolates video from Keyframes and Latent Vecto
 
 import json
 import os
+import sys
+from pathlib import Path
 from typing import List
+
+# Windows DLL initialization guard for PIL/torchvision
+from PIL import Image  # isort: skip # noqa: F401
 
 import cv2
 import hydra
@@ -16,14 +21,24 @@ import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-from agilab_lib.datasets.video_dataset import (
+# Ensure 'src' is in sys.path when invoked directly
+SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from agilab_lib.datasets.video_dataset import (  # noqa: E402
     DummyVideoDataset,
     VideoDataset,
 )
-from agilab_lib.models.rlt import ChainedLatentTransformer, ExecutionOrder
-from agilab_lib.models.rrdn import RRDN
-from agilab_lib.models.vae import VAE
-from agilab_lib.utils.interpolation import linear_interpolate_latent_sequence
+from agilab_lib.models.rlt import (  # noqa: E402
+    ChainedLatentTransformer,
+    ExecutionOrder,
+)
+from agilab_lib.models.rrdn import RRDN  # noqa: E402
+from agilab_lib.models.vae import VAE  # noqa: E402
+from agilab_lib.utils.interpolation import (  # noqa: E402
+    linear_interpolate_latent_sequence,
+)
 
 
 def render_frames_to_video(
@@ -52,12 +67,14 @@ def render_frames_to_video(
     writer.release()
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="generate_video")
-def main(cfg: DictConfig) -> None:
-    """Entry point for video generation pipeline.
+def generate_video(cfg: DictConfig) -> str:
+    """Executes the video generation and interpolation pipeline.
 
     Args:
         cfg: Hydra configuration dictionary.
+
+    Returns:
+        Path to the generated video file.
     """
     print("Executing Video Generation pipeline with config:")
     print(OmegaConf.to_yaml(cfg))
@@ -65,11 +82,35 @@ def main(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1. Initialize VAE
-    vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
-    if cfg.vae_checkpoint and os.path.exists(cfg.vae_checkpoint):
-        vae.load_state_dict(
-            torch.load(cfg.vae_checkpoint, map_location=device, weights_only=True)
+    latent_dim = int(cfg.latent_dim)
+    vae = VAE(latent_dim=latent_dim).to(device)
+    if cfg.vae_checkpoint and os.path.exists(str(cfg.vae_checkpoint)):
+        ckpt = torch.load(
+            str(cfg.vae_checkpoint), map_location=device, weights_only=True
         )
+        if isinstance(ckpt, dict):
+            for candidate_key in (
+                "state_dict",
+                "model_state_dict",
+                "vae_state_dict",
+                "vae",
+            ):
+                if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
+                    ckpt = ckpt[candidate_key]
+                    break
+            cleaned_sd = {}
+            vae_keys = set(vae.state_dict().keys())
+            for k, v in ckpt.items():
+                key = k
+                if key.startswith("module."):
+                    key = key[len("module.") :]
+                if key.startswith("vae."):
+                    key = key[len("vae.") :]
+                if key in vae_keys:
+                    cleaned_sd[key] = v
+            vae.load_state_dict(cleaned_sd if cleaned_sd else ckpt)
+        else:
+            vae.load_state_dict(ckpt)
         print(f"Loaded VAE checkpoint: {cfg.vae_checkpoint}")
     vae.eval()
 
@@ -119,8 +160,23 @@ def main(cfg: DictConfig) -> None:
         substep_angle = cfg.get("substep_angle_deg", None)
         substep_dist = cfg.get("substep_distance_meters", None)
 
+        default_hidden = 512 if latent_dim == 512 else 128
+        hidden_dim = int(cfg.get("hidden_dim") or default_hidden)
+
+        default_fwd_blocks = 5 if latent_dim == 512 else 2
+        fwd_blocks = int(cfg.get("forward_num_blocks") or default_fwd_blocks)
+
+        rot_blocks = int(cfg.get("rotation_num_blocks") or 5)
+
+        default_inner_dim = hidden_dim
+        block_inner_dim = int(cfg.get("block_inner_dim") or default_inner_dim)
+
         chained_model = ChainedLatentTransformer(
-            latent_dim=int(cfg.latent_dim),
+            latent_dim=latent_dim,
+            hidden_dim=hidden_dim,
+            forward_num_blocks=fwd_blocks,
+            rotation_num_blocks=rot_blocks,
+            block_inner_dim=block_inner_dim,
             rotation_checkpoint=(
                 rot_ckpt if rot_ckpt and os.path.exists(str(rot_ckpt)) else None
             ),
@@ -185,8 +241,20 @@ def main(cfg: DictConfig) -> None:
         output_frames.append(frame_bgr)
 
     # 9. Write MP4 video
-    render_frames_to_video(output_frames, str(cfg.output_video), fps=int(cfg.fps))
-    print(f"Successfully generated video saved to: {cfg.output_video}")
+    out_video_str = str(cfg.output_video)
+    render_frames_to_video(output_frames, out_video_str, fps=int(cfg.fps))
+    print(f"Successfully generated video saved to: {out_video_str}")
+    return out_video_str
+
+
+@hydra.main(version_base=None, config_path="../configs", config_name="generate_video")
+def main(cfg: DictConfig) -> None:
+    """CLI entry point for video generation pipeline.
+
+    Args:
+        cfg: Hydra configuration dictionary.
+    """
+    generate_video(cfg)
 
 
 if __name__ == "__main__":
