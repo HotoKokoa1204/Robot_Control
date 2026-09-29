@@ -12,13 +12,14 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from torch.utils.data import DataLoader
+
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceBatch,
     DualSourceVideoDataset,
     DummyDualSourceVideoDataset,
     dual_source_collate_fn,
 )
-from torch.utils.data import DataLoader
 
 
 def _create_synthetic_video(
