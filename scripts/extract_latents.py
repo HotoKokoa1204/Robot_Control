@@ -12,8 +12,9 @@ from typing import Dict, List, Union
 import cv2
 import hydra
 import torch
-from agilab_lib.models.vae import VAE
 from omegaconf import DictConfig, OmegaConf
+
+from agilab_lib.models.vae import VAE
 
 
 def extract_video_latents(

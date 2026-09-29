@@ -1,6 +1,7 @@
 """Unit tests for RRDN, discriminator, and super-resolution datasets."""
 
 import torch
+
 from agilab_lib.datasets.sr_dataset import DummyPairedFrameDataset
 from agilab_lib.models.rrdn import (
     RRDN,
