@@ -7,6 +7,7 @@ Description: Neural network model architectures for Visual Navigation System.
 """
 
 from agilab_lib.models.angle_predictor import AnglePredictor
+from agilab_lib.models.perceptual import VGGPerceptualLoss
 from agilab_lib.models.rlt import (
     BaseLatentTransformer,
     ChainedLatentTransformer,
@@ -32,4 +33,5 @@ __all__ = [
     "ChainedLatentTransformer",
     "ExecutionOrder",
     "AnglePredictor",
+    "VGGPerceptualLoss",
 ]
