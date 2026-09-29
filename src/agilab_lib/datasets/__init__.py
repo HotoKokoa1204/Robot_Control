@@ -6,6 +6,12 @@ Date: 2026-09-07
 Description: Dataset loaders for video and latent trajectory representations.
 """
 
+from agilab_lib.datasets.dual_source_dataset import (
+    DualSourceBatch,
+    DualSourceVideoDataset,
+    DummyDualSourceVideoDataset,
+    dual_source_collate_fn,
+)
 from agilab_lib.datasets.latent_dataset import (
     AngleDataset,
     CachedLatentDataset,
@@ -34,4 +40,8 @@ __all__ = [
     "DummyLatentHorizonDataset",
     "AngleDataset",
     "CachedLatentDataset",
+    "DualSourceBatch",
+    "DualSourceVideoDataset",
+    "DummyDualSourceVideoDataset",
+    "dual_source_collate_fn",
 ]
