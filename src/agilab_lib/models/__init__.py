@@ -7,6 +7,7 @@ Description: Neural network model architectures for Visual Navigation System.
 """
 
 from agilab_lib.models.angle_predictor import AnglePredictor
+from agilab_lib.models.joint_loss import JointLossOutput, JointNavigationLoss
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.perceptual import VGGPerceptualLoss
 from agilab_lib.models.rlt import (
@@ -36,4 +37,6 @@ __all__ = [
     "AnglePredictor",
     "JointNavigationModel",
     "VGGPerceptualLoss",
+    "JointNavigationLoss",
+    "JointLossOutput",
 ]
