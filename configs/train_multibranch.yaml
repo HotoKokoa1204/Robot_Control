@@ -10,6 +10,7 @@ straight_video_speed_mps: 2.5
 recon_source: "random"
 use_dummy_if_missing: true
 rotation_one_per_subfolder: true # Pick at most 1 rotation video per subfolder in data/360
+preload_frames: false # Set true to preload frames into RAM (~5GB for 88 videos, eliminates CPU bottleneck and maximizes GPU utilization)
 num_samples: 1600 # Pairs sampled per epoch (1600 = 100 batches; set null for full 2300 pairs)
 
 # Model architecture settings

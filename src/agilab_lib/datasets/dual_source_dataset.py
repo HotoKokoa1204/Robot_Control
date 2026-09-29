@@ -15,6 +15,11 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
+
 
 class DualSourceBatch(dict):
     """Structured container mapping keys to dual-source paired batch tensors.
@@ -627,7 +632,13 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
             Mapping from video path to numpy array of shape (N, H, W, 3).
         """
         cached: Dict[Path, np.ndarray] = {}
-        for vp in video_paths:
+        iterator = (
+            tqdm(video_paths, desc="Preloading videos into RAM", unit="vid")
+            if tqdm is not None
+            else video_paths
+        )
+        total_frames = 0
+        for vp in iterator:
             cap = cv2.VideoCapture(str(vp))
             if not cap.isOpened():
                 continue
@@ -644,7 +655,15 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                 ret, frame = cap.read()
             cap.release()
             if frames:
-                cached[vp] = np.stack(frames, axis=0)
+                stacked = np.stack(frames, axis=0)
+                cached[vp] = stacked
+                total_frames += len(stacked)
+
+        total_mb = (total_frames * self.img_height * self.img_width * 3) / (1024 * 1024)
+        print(
+            f"Preloaded {len(cached)} videos ({total_frames} frames, "
+            f"~{total_mb:.1f} MB) into RAM."
+        )
         return cached
 
     @staticmethod
