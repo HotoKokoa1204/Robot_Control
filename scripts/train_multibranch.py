@@ -32,6 +32,7 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -64,6 +65,17 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
 
     if one_path_dir.exists() and rotation_dir.exists():
         try:
+            num_samples_cfg = cfg.get("num_samples", None)
+            num_samples_val = (
+                int(num_samples_cfg) if num_samples_cfg is not None else None
+            )
+            max_vids_cfg = cfg.get("max_videos_per_source", None)
+            max_vids_val = int(max_vids_cfg) if max_vids_cfg is not None else None
+            samples_per_vid_cfg = cfg.get("samples_per_video", 50)
+            samples_per_vid_val = (
+                int(samples_per_vid_cfg) if samples_per_vid_cfg is not None else None
+            )
+
             dataset = DualSourceVideoDataset(
                 one_path_dir=one_path_dir,
                 rotation_dir=rotation_dir,
@@ -73,6 +85,9 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
                 straight_video_speed_mps=float(
                     cfg.get("straight_video_speed_mps", 2.5)
                 ),
+                max_videos_per_source=max_vids_val,
+                samples_per_video=samples_per_vid_val,
+                num_samples=num_samples_val,
                 recon_source=recon_source,
             )
             if len(dataset) > 0:
@@ -297,7 +312,15 @@ def train_multibranch(
         epoch_kl = 0.0
         num_batches = len(train_loader)
 
-        for batch_idx, raw_batch in enumerate(train_loader):
+        batch_iter = tqdm(
+            train_loader,
+            desc=f"Epoch {epoch + 1:2d}/{max_epochs}",
+            unit="batch",
+            leave=False,
+            dynamic_ncols=True,
+        )
+
+        for batch_idx, raw_batch in enumerate(batch_iter):
             if isinstance(raw_batch, DualSourceBatch) or hasattr(raw_batch, "to"):
                 batch = raw_batch.to(device)
             elif isinstance(raw_batch, dict):
@@ -340,6 +363,13 @@ def train_multibranch(
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
+
+            batch_iter.set_postfix(
+                loss=f"{total_loss.item():.4f}",
+                recon=f"{loss_output.metrics['loss_recon'].item():.3f}",
+                fwd=f"{loss_output.metrics['loss_fwd'].item():.3f}",
+                rot=f"{loss_output.metrics['loss_rot'].item():.3f}",
+            )
 
         # Compute average metrics across all batches for the epoch
         n_b = max(num_batches, 1)

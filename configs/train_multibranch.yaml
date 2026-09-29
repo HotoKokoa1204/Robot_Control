@@ -9,7 +9,7 @@ video_fps: 60.0
 straight_video_speed_mps: 2.5
 recon_source: "random"
 use_dummy_if_missing: true
-num_samples: 64
+num_samples: 1600 # Pairs sampled per epoch (1600 = 100 batches; set null for full 23000 pairs)
 
 # Model architecture settings
 latent_dim: 512
