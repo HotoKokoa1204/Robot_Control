@@ -56,6 +56,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
     one_path_dir = Path(str(cfg.get("one_path_dir", "data/one_path")))
     rotation_dir = Path(str(cfg.get("rotation_dir", "data/360")))
     use_dummy = bool(cfg.get("use_dummy_if_missing", True))
+    recon_source = str(cfg.get("recon_source", "random"))
 
     if one_path_dir.exists() and rotation_dir.exists():
         try:
@@ -68,6 +69,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
                 straight_video_speed_mps=float(
                     cfg.get("straight_video_speed_mps", 2.5)
                 ),
+                recon_source=recon_source,
             )
             if len(dataset) > 0:
                 print(
@@ -96,6 +98,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
         num_samples=int(cfg.get("num_samples", 64)),
         img_height=int(cfg.get("img_height", 108)),
         img_width=int(cfg.get("img_width", 192)),
+        recon_source=recon_source,
         seed=cfg.get("seed", 42),
     )
 
@@ -319,11 +322,13 @@ def train_multibranch(
             epoch_kl += loss_output.metrics["recon_kl"].item()
 
             # Gradient accumulation scaling and backward pass
-            loss_scaled = total_loss / accum_steps
-            scaler.scale(loss_scaled).backward()
-
             is_accum_step = (batch_idx + 1) % accum_steps == 0
             is_last_batch = (batch_idx + 1) == num_batches
+
+            rem = (batch_idx % accum_steps) + 1
+            actual_steps = rem if (is_last_batch and not is_accum_step) else accum_steps
+            loss_scaled = total_loss / actual_steps
+            scaler.scale(loss_scaled).backward()
 
             if is_accum_step or is_last_batch:
                 scaler.step(optimizer)

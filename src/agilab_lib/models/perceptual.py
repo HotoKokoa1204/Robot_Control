@@ -6,6 +6,7 @@ Date: 2026-09-29
 Description: Frozen VGG-16 Perceptual Loss module with multi-scale features.
 """
 
+import warnings
 from typing import Dict, List, Optional, Sequence
 
 from PIL import Image  # isort: skip # noqa: F401
@@ -141,7 +142,14 @@ class VGGPerceptualLoss(nn.Module):
                 else:
                     vgg = models.vgg16(pretrained=True)
                 return vgg.features
-            except Exception:
+            except Exception as err:
+                warnings.warn(
+                    f"Failed to load pretrained VGG-16 weights ({err}). "
+                    "Falling back to uninitialized weights. "
+                    "Perceptual loss may be degraded.",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 vgg = models.vgg16(weights=None)
                 return vgg.features
         vgg = models.vgg16(weights=None)
