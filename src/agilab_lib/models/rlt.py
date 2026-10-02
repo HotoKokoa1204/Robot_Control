@@ -39,6 +39,17 @@ class ConditionedResidualBlock(nn.Module):
         self.fc2: nn.Linear = nn.Linear(hidden_dim, hidden_dim)
         self.ln2: nn.LayerNorm = nn.LayerNorm(hidden_dim)
         self.fc3: nn.Linear = nn.Linear(hidden_dim, dim)
+        nn.init.zeros_(self.fc3.weight)
+        nn.init.zeros_(self.fc3.bias)
+
+    def reset_parameters(self) -> None:
+        """Reset residual block parameters, zeroing fc3 for identity initialization."""
+        self.fc1.reset_parameters()
+        self.ln1.reset_parameters()
+        self.fc2.reset_parameters()
+        self.ln2.reset_parameters()
+        nn.init.zeros_(self.fc3.weight)
+        nn.init.zeros_(self.fc3.bias)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """Forward pass applying conditioned residual transformation.
@@ -60,8 +71,8 @@ class ConditionedResidualBlock(nn.Module):
 class BaseLatentTransformer(nn.Module):
     """Base class for conditioned Residual Latent Transformers.
 
-    Encapsulates linear input projection, stacked ConditionedResidualBlock layers,
-    and output projection.
+    Routes latent vectors directly through stacked ConditionedResidualBlock
+    layers without linear projection bottlenecks or ReLU clipping.
     """
 
     def __init__(
@@ -76,7 +87,7 @@ class BaseLatentTransformer(nn.Module):
 
         Args:
             latent_dim: Dimension of input and output Latent Vectors.
-            hidden_dim: Hidden dimension for feature projection.
+            hidden_dim: Legacy hidden dimension parameter (preserved for compatibility).
             num_blocks: Number of stacked ConditionedResidualBlock layers.
             block_inner_dim: Hidden dimension inside each residual block.
             cond_dim: Dimension of the conditioning vector.
@@ -88,17 +99,24 @@ class BaseLatentTransformer(nn.Module):
         self.block_inner_dim: int = block_inner_dim
         self.cond_dim: int = cond_dim
 
-        self.fc_in: nn.Linear = nn.Linear(latent_dim, hidden_dim)
+        self.fc_in: nn.Module = nn.Identity()
         self.blocks: nn.ModuleList = nn.ModuleList(
             [
-                ConditionedResidualBlock(hidden_dim, block_inner_dim, cond_dim=cond_dim)
+                ConditionedResidualBlock(latent_dim, block_inner_dim, cond_dim=cond_dim)
                 for _ in range(num_blocks)
             ]
         )
-        self.fc_out: nn.Linear = nn.Linear(hidden_dim, latent_dim)
+        self.fc_out: nn.Module = nn.Identity()
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """Reset transformer residual blocks to identity zero-initialization."""
+        for blk in self.blocks:
+            nn.init.zeros_(blk.fc3.weight)
+            nn.init.zeros_(blk.fc3.bias)
 
     def _forward_blocks(self, latent: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """Forward pass through input projection, blocks, and output projection.
+        """Forward pass directly through stacked conditioned residual blocks.
 
         Args:
             latent: Current Latent Vector of shape (B, latent_dim).
@@ -107,10 +125,10 @@ class BaseLatentTransformer(nn.Module):
         Returns:
             Transformed Latent Vector of shape (B, latent_dim).
         """
-        x = F.relu(self.fc_in(latent))
+        x = latent
         for blk in self.blocks:
             x = blk(x, cond)
-        return self.fc_out(x)
+        return x
 
 
 class ResidualLatentTransformer(BaseLatentTransformer):
@@ -147,17 +165,18 @@ class ResidualLatentTransformer(BaseLatentTransformer):
     def forward(
         self,
         latent: torch.Tensor,
-        angle_deg: Optional[torch.Tensor] = None,
-        distance_meters: Optional[torch.Tensor] = None,
+        angle_deg: Optional[Union[torch.Tensor, float]] = None,
+        distance_meters: Optional[Union[torch.Tensor, float]] = None,
         sin_cos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass predicting the transformed Latent Vector.
 
         Args:
             latent: Current Latent Vector of shape (B, latent_dim).
-            angle_deg: Optional rotation angle in degrees of shape (B, 1) or (B,).
+            angle_deg: Optional rotation angle in degrees of shape (B, 1), (B,),
+                or scalar float.
             distance_meters: Optional linear forward distance in meters of shape
-                (B, 1) or (B,).
+                (B, 1), (B,), or scalar float.
             sin_cos: Optional direct [sin, cos] unit vector tensor of shape (B, 2).
 
         Returns:
@@ -165,20 +184,30 @@ class ResidualLatentTransformer(BaseLatentTransformer):
         """
         if distance_meters is None:
             distance_meters = torch.zeros(latent.shape[0], 1, device=latent.device)
+        elif isinstance(distance_meters, (int, float)):
+            distance_meters = torch.full(
+                (latent.shape[0], 1), float(distance_meters), device=latent.device
+            )
         elif distance_meters.dim() == 1:
             distance_meters = distance_meters.unsqueeze(1)
 
         if sin_cos is None:
             if angle_deg is None:
                 angle_deg = torch.zeros(latent.shape[0], 1, device=latent.device)
+            elif isinstance(angle_deg, (int, float)):
+                angle_deg = torch.full(
+                    (latent.shape[0], 1), float(angle_deg), device=latent.device
+                )
             elif angle_deg.dim() == 1:
                 angle_deg = angle_deg.unsqueeze(1)
-            rad = angle_deg * math.pi / 180.0
+            rad = angle_deg * (math.pi / 180.0)
             cond_sin = torch.sin(rad)
             cond_cos = torch.cos(rad)
             sin_cos = torch.cat([cond_sin, cond_cos], dim=-1)
 
-        cond = torch.cat([sin_cos, distance_meters], dim=-1).to(latent.device)
+        cond = torch.cat(
+            [sin_cos.to(latent.device), distance_meters.to(latent.device)], dim=-1
+        )
         return self._forward_blocks(latent, cond)
 
 
@@ -369,6 +398,11 @@ class ChainedLatentTransformer(nn.Module):
                 block_inner_dim=block_inner_dim,
             )
             self._load_checkpoint(self.forward_model, forward_checkpoint)
+
+    def reset_parameters(self) -> None:
+        """Reset parameters of rotation and forward models to identity zero-init."""
+        self.rotation_model.reset_parameters()
+        self.forward_model.reset_parameters()
 
     @staticmethod
     def _load_checkpoint(

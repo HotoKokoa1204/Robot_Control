@@ -10,16 +10,26 @@ from pathlib import Path
 
 import pytest
 import torch
-
+import torch.nn as nn
 from agilab_lib.datasets.latent_dataset import CachedLatentDataset
 from agilab_lib.models.rlt import (
     BaseLatentTransformer,
     ChainedLatentTransformer,
+    ConditionedResidualBlock,
     ExecutionOrder,
     ForwardLatentTransformer,
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+
+
+def _init_test_weights(model: nn.Module) -> None:
+    """Initialize non-zero test weights in residual blocks for motion tests."""
+    with torch.no_grad():
+        for m in model.modules():
+            if isinstance(m, ConditionedResidualBlock):
+                nn.init.normal_(m.fc3.weight, mean=0.0, std=0.2)
+                nn.init.normal_(m.fc3.bias, mean=0.0, std=0.1)
 
 
 def test_rotation_latent_transformer_shapes() -> None:
@@ -145,6 +155,7 @@ def test_chained_latent_transformer_execution_order() -> None:
         forward_num_blocks=2,
         block_inner_dim=32,
     )
+    _init_test_weights(model)
     z = torch.randn(3, 64)
     theta = torch.tensor([[45.0], [-60.0], [90.0]])
     dist = torch.tensor([[1.5], [0.8], [2.0]])
@@ -177,6 +188,7 @@ def test_single_action_invariance() -> None:
         forward_num_blocks=2,
         block_inner_dim=32,
     )
+    _init_test_weights(model)
     z = torch.randn(4, 64)
 
     # 1. Pure rotation (distance = 0.0): both orders must yield identical results
@@ -276,6 +288,8 @@ def test_chained_latent_transformer_checkpoint_loading(tmp_path: Path) -> None:
     fwd_model = ForwardLatentTransformer(
         latent_dim=64, hidden_dim=32, num_blocks=2, block_inner_dim=32
     )
+    _init_test_weights(rot_model)
+    _init_test_weights(fwd_model)
 
     rot_ckpt = tmp_path / "rot.pt"
     fwd_ckpt = tmp_path / "fwd.pt"
@@ -310,6 +324,7 @@ def test_chained_latent_transformer_mixed_batch_invariance() -> None:
         forward_num_blocks=2,
         block_inner_dim=32,
     )
+    _init_test_weights(model)
     # Batch with mixed motion profiles:
     # 0: pure forward (angle=0, dist=1.5)
     # 1: pure rotation (angle=30, dist=0)
@@ -346,6 +361,7 @@ def test_forward_first_intermediate_latent_zero_dist() -> None:
         forward_num_blocks=2,
         block_inner_dim=32,
     )
+    _init_test_weights(model)
     z = torch.randn(3, 64)
     theta = torch.tensor([[25.0], [-15.0], [40.0]])
     zero_dist = torch.zeros(3, 1)
@@ -413,6 +429,7 @@ def test_base_latent_transformer_shapes() -> None:
 def test_chained_latent_transformer_keyframe_deduplication() -> None:
     """Test keyframe deduplication logic in compound chained transformer execution."""
     model = ChainedLatentTransformer(latent_dim=64, hidden_dim=32)
+    _init_test_weights(model)
     z_start = torch.randn(1, 64)
 
     def assemble_keyframes(
@@ -463,6 +480,7 @@ def test_chained_latent_transformer_keyframe_deduplication() -> None:
 def test_chained_latent_transformer_generate_progressive_keyframes() -> None:
     """Test progressive keyframe generation with and without sub-stepping."""
     model = ChainedLatentTransformer(latent_dim=64, hidden_dim=32)
+    _init_test_weights(model)
     z_start = torch.randn(1, 64)
 
     # 1. Zero motion: generates 2 identical keyframes
@@ -605,3 +623,163 @@ def test_rlt_decoded_image_loss_backpropagation() -> None:
     # VAE weights must strictly remain frozen
     for p in vae.parameters():
         assert p.grad is None
+
+
+def test_rotation_latent_transformer_zero_motion_exact_identity() -> None:
+    """Verify rotation transformer yields exact numerical identity at zero motion."""
+    latent_dim = 128
+    model = RotationLatentTransformer(
+        latent_dim=latent_dim,
+        hidden_dim=64,
+        num_blocks=5,
+        block_inner_dim=64,
+    )
+    z = torch.randn(8, latent_dim)
+
+    # 1. Scalar angle 0.0
+    out_scalar = model(z, angle_deg=0.0)
+    assert torch.equal(out_scalar, z)
+    assert torch.max(torch.abs(out_scalar - z)).item() == 0.0
+
+    # 2. Tensor angle 0.0
+    out_tensor = model(z, angle_deg=torch.zeros(8, 1))
+    assert torch.equal(out_tensor, z)
+    assert torch.max(torch.abs(out_tensor - z)).item() == 0.0
+
+    # 3. Direct unit vector sin_cos = [0, 1]
+    sc = torch.tensor([[0.0, 1.0]]).expand(8, 2)
+    out_sc = model(z, sin_cos=sc)
+    assert torch.equal(out_sc, z)
+    assert torch.max(torch.abs(out_sc - z)).item() == 0.0
+
+
+def test_forward_latent_transformer_zero_motion_exact_identity() -> None:
+    """Verify forward transformer yields exact numerical identity at zero motion."""
+    latent_dim = 128
+    model = ForwardLatentTransformer(
+        latent_dim=latent_dim,
+        hidden_dim=64,
+        num_blocks=2,
+        block_inner_dim=64,
+    )
+    z = torch.randn(8, latent_dim)
+
+    # 1. Scalar distance 0.0
+    out_scalar = model(z, distance_meters=0.0)
+    assert torch.equal(out_scalar, z)
+    assert torch.max(torch.abs(out_scalar - z)).item() == 0.0
+
+    # 2. Tensor distance 0.0
+    out_tensor = model(z, distance_meters=torch.zeros(8, 1))
+    assert torch.equal(out_tensor, z)
+    assert torch.max(torch.abs(out_tensor - z)).item() == 0.0
+
+
+def test_decoupled_transformers_negative_coordinate_preservation() -> None:
+    """Verify negative latent coordinates are preserved without ReLU truncation."""
+    latent_dim = 128
+    rot_model = RotationLatentTransformer(latent_dim=latent_dim, num_blocks=5)
+    fwd_model = ForwardLatentTransformer(latent_dim=latent_dim, num_blocks=2)
+
+    # Strictly negative latent tensor
+    z_neg = -torch.abs(torch.randn(4, latent_dim)) - 0.5
+    assert torch.all(z_neg < 0.0)
+
+    # Rotation model preserves negative values
+    out_rot = rot_model(z_neg, angle_deg=0.0)
+    assert torch.all(out_rot < 0.0)
+    assert torch.equal(out_rot, z_neg)
+    assert torch.max(torch.abs(out_rot - z_neg)).item() == 0.0
+
+    # Forward model preserves negative values
+    out_fwd = fwd_model(z_neg, distance_meters=0.0)
+    assert torch.all(out_fwd < 0.0)
+    assert torch.equal(out_fwd, z_neg)
+    assert torch.max(torch.abs(out_fwd - z_neg)).item() == 0.0
+
+
+def test_decoupled_transformers_direct_stream_blocks_dim_and_reset_parameters() -> None:
+    """Verify direct-stream block dimensions and reset_parameters zeroing contract."""
+    latent_dim = 64
+    rot_model = RotationLatentTransformer(
+        latent_dim=latent_dim, num_blocks=3, block_inner_dim=32
+    )
+    fwd_model = ForwardLatentTransformer(
+        latent_dim=latent_dim, num_blocks=2, block_inner_dim=32
+    )
+
+    assert isinstance(rot_model.fc_in, nn.Identity)
+    assert isinstance(rot_model.fc_out, nn.Identity)
+    assert isinstance(fwd_model.fc_in, nn.Identity)
+    assert isinstance(fwd_model.fc_out, nn.Identity)
+
+    for blk in rot_model.blocks:
+        assert isinstance(blk, ConditionedResidualBlock)
+        assert blk.fc1.in_features == latent_dim + 2
+        assert blk.fc3.out_features == latent_dim
+        assert torch.all(blk.fc3.weight == 0.0)
+        assert torch.all(blk.fc3.bias == 0.0)
+
+    for blk in fwd_model.blocks:
+        assert isinstance(blk, ConditionedResidualBlock)
+        assert blk.fc1.in_features == latent_dim + 1
+        assert blk.fc3.out_features == latent_dim
+        assert torch.all(blk.fc3.weight == 0.0)
+        assert torch.all(blk.fc3.bias == 0.0)
+
+    # Check reset_parameters
+    for blk in rot_model.blocks:
+        blk.fc3.weight.data.fill_(0.5)
+        blk.fc3.bias.data.fill_(0.5)
+    rot_model.reset_parameters()
+    for blk in rot_model.blocks:
+        assert torch.all(blk.fc3.weight == 0.0)
+        assert torch.all(blk.fc3.bias == 0.0)
+
+    for blk in fwd_model.blocks:
+        blk.fc3.weight.data.fill_(0.5)
+        blk.fc3.bias.data.fill_(0.5)
+    fwd_model.reset_parameters()
+    for blk in fwd_model.blocks:
+        assert torch.all(blk.fc3.weight == 0.0)
+        assert torch.all(blk.fc3.bias == 0.0)
+
+
+def test_decoupled_transformers_gradient_flow_non_zero_motion() -> None:
+    """Verify clean gradient propagation through all decoupled transformer blocks."""
+    latent_dim = 32
+    rot_model = RotationLatentTransformer(
+        latent_dim=latent_dim, num_blocks=3, block_inner_dim=16
+    )
+    fwd_model = ForwardLatentTransformer(
+        latent_dim=latent_dim, num_blocks=2, block_inner_dim=16
+    )
+
+    _init_test_weights(rot_model)
+    _init_test_weights(fwd_model)
+
+    # 1. Rotation model gradient flow
+    z_rot = torch.randn(2, latent_dim, requires_grad=True)
+    out_rot = rot_model(z_rot, angle_deg=torch.tensor([[30.0], [-60.0]]))
+    loss_rot = (out_rot**2).sum()
+    loss_rot.backward()
+
+    assert z_rot.grad is not None
+    assert torch.any(z_rot.grad != 0.0)
+    for blk in rot_model.blocks:
+        assert blk.fc1.weight.grad is not None and torch.any(blk.fc1.weight.grad != 0.0)
+        assert blk.fc2.weight.grad is not None and torch.any(blk.fc2.weight.grad != 0.0)
+        assert blk.fc3.weight.grad is not None and torch.any(blk.fc3.weight.grad != 0.0)
+
+    # 2. Forward model gradient flow
+    z_fwd = torch.randn(2, latent_dim, requires_grad=True)
+    out_fwd = fwd_model(z_fwd, distance_meters=torch.tensor([[1.0], [2.0]]))
+    loss_fwd = (out_fwd**2).sum()
+    loss_fwd.backward()
+
+    assert z_fwd.grad is not None
+    assert torch.any(z_fwd.grad != 0.0)
+    for blk in fwd_model.blocks:
+        assert blk.fc1.weight.grad is not None and torch.any(blk.fc1.weight.grad != 0.0)
+        assert blk.fc2.weight.grad is not None and torch.any(blk.fc2.weight.grad != 0.0)
+        assert blk.fc3.weight.grad is not None and torch.any(blk.fc3.weight.grad != 0.0)
