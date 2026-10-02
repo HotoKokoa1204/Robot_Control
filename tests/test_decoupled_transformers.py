@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn as nn
+
 from agilab_lib.datasets.latent_dataset import CachedLatentDataset
 from agilab_lib.models.rlt import (
     BaseLatentTransformer,
