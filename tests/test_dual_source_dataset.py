@@ -12,14 +12,13 @@ import cv2
 import numpy as np
 import pytest
 import torch
-from torch.utils.data import DataLoader
-
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceBatch,
     DualSourceVideoDataset,
     DummyDualSourceVideoDataset,
     dual_source_collate_fn,
 )
+from torch.utils.data import DataLoader
 
 
 def _create_synthetic_video(
@@ -235,8 +234,8 @@ def test_dual_source_video_dataset_with_synthetic_videos(tmp_path: Path) -> None
     rot_dir = tmp_path / "360"
 
     # Create synthetic video files
-    _create_synthetic_video(fwd_dir / "vid1.mp4", num_frames=20, fps=30.0)
-    _create_synthetic_video(rot_dir / "vid2.mp4", num_frames=20, fps=30.0)
+    _create_synthetic_video(fwd_dir / "vid1.mp4", num_frames=120, fps=30.0)
+    _create_synthetic_video(rot_dir / "vid2.mp4", num_frames=120, fps=30.0)
 
     # Test on-demand reading (preload_frames=False)
     dataset_ondemand = DualSourceVideoDataset(
@@ -264,6 +263,14 @@ def test_dual_source_video_dataset_with_synthetic_videos(tmp_path: Path) -> None
     # Verify rotation unit vector
     sc_norm = torch.linalg.norm(item.rot_sin_cos).item()
     assert math.isclose(sc_norm, 1.0, rel_tol=1e-4)
+
+    # Verify straight-line buffer pruning: frames must be strictly in [40, 80)
+    assert len(dataset_ondemand.fwd_pairs) == 10
+    for _, t, j, dist in dataset_ondemand.fwd_pairs:
+        assert 40 <= t < 80
+        assert 40 < j < 80
+        assert t < j
+        assert math.isclose(dist, (j - t) * dataset_ondemand.step_distance_meters)
 
     # Test preloading (preload_frames=True)
     dataset_preloaded = DualSourceVideoDataset(
@@ -366,3 +373,154 @@ def test_dual_source_video_dataset_one_per_subfolder(tmp_path: Path) -> None:
         rot_dir, one_per_subfolder=False
     )
     assert len(found_all) == 4
+
+
+def test_buffer_frames_calculation_and_defaults() -> None:
+    """Verify buffer_distance_meters default, calculation, and overriding.
+
+    Ensures that default 2.0 meters at 60 FPS / 2.5 m/s cruising speed yields
+    exactly 48 frames, and explicit parameters correctly override.
+    """
+    # 1. DummyDualSourceVideoDataset defaults
+    dummy_default = DummyDualSourceVideoDataset()
+    assert dummy_default.buffer_distance_meters == 2.0
+    assert dummy_default.step_distance_meters == 2.5 / 60.0
+    assert dummy_default.buffer_frames == 48
+
+    # 2. Custom buffer distance in meters
+    dummy_1m = DummyDualSourceVideoDataset(buffer_distance_meters=1.0)
+    assert dummy_1m.buffer_distance_meters == 1.0
+    assert dummy_1m.buffer_frames == 24
+
+    # 3. Explicit buffer_frames overriding buffer_distance_meters
+    dummy_override = DummyDualSourceVideoDataset(
+        buffer_distance_meters=2.0, buffer_frames=15
+    )
+    assert dummy_override.buffer_frames == 15
+
+    # 4. Zero buffer disables margin trimming
+    dummy_zero = DummyDualSourceVideoDataset(buffer_distance_meters=0.0)
+    assert dummy_zero.buffer_frames == 0
+
+
+def test_straight_path_buffer_pruning_bounds(tmp_path: Path) -> None:
+    """Verify straight-path indexing excludes first and last buffer_frames.
+
+    Checks:
+    1. Default buffer_distance_meters=2.0 calculates buffer_frames=48 for
+       60 FPS / 2.5 m/s.
+    2. Base and target frame indices are strictly inside
+       [buffer_frames, total_frames - buffer_frames).
+    3. Neither base nor target frames ever fall in [0, buffer_frames)
+       or [total_frames - buffer_frames, total_frames).
+    4. Short videos with frames <= 2 * buffer_frames are safely skipped.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    fwd_dir = tmp_path / "one_path"
+    rot_dir = tmp_path / "360"
+    fwd_dir.mkdir(parents=True)
+    rot_dir.mkdir(parents=True)
+
+    total_frames = 150
+    fps = 60.0
+    speed = 2.5
+    _create_synthetic_video(fwd_dir / "fwd.mp4", num_frames=total_frames, fps=fps)
+    _create_synthetic_video(rot_dir / "rot.mp4", num_frames=total_frames, fps=fps)
+
+    # Instantiate dataset with defaults (buffer_distance_meters=2.0)
+    dataset = DualSourceVideoDataset(
+        one_path_dir=fwd_dir,
+        rotation_dir=rot_dir,
+        video_fps=fps,
+        straight_video_speed_mps=speed,
+        samples_per_video=200,
+        min_forward_offset=1,
+        max_forward_offset=30,
+        seed=42,
+    )
+
+    expected_buffer = 48
+    expected_start = expected_buffer
+    expected_end = total_frames - expected_buffer  # 150 - 48 = 102
+
+    assert dataset.buffer_distance_meters == 2.0
+    assert dataset.buffer_frames == expected_buffer
+    assert len(dataset.fwd_pairs) > 0
+
+    lower_buffer_frames = set(range(0, expected_start))
+    upper_buffer_frames = set(range(expected_end, total_frames))
+
+    for _, t, j, dist in dataset.fwd_pairs:
+        # Strict boundary assertion: base and target in [expected_start, expected_end)
+        assert (
+            expected_start <= t < expected_end
+        ), f"Base frame {t} outside [{expected_start}, {expected_end})"
+        assert (
+            expected_start < j < expected_end
+        ), f"Target frame {j} outside [{expected_start}, {expected_end})"
+        assert t < j
+
+        # Verify neither frame is in lower buffer [0, buffer_frames)
+        assert t not in lower_buffer_frames, f"Base frame {t} in lower buffer!"
+        assert j not in lower_buffer_frames, f"Target frame {j} in lower buffer!"
+
+        # Verify neither frame is in upper buffer [end, total_frames)
+        assert t not in upper_buffer_frames, f"Base frame {t} in upper buffer!"
+        assert j not in upper_buffer_frames, f"Target frame {j} in upper buffer!"
+
+        # Verify distance calculation
+        expected_dist = (j - t) * dataset.step_distance_meters
+        assert math.isclose(dist, expected_dist, rel_tol=1e-5)
+
+    # Exhaustive sweep test (samples_per_video=None)
+    dataset_exhaustive = DualSourceVideoDataset(
+        one_path_dir=fwd_dir,
+        rotation_dir=rot_dir,
+        video_fps=fps,
+        straight_video_speed_mps=speed,
+        samples_per_video=None,
+        samples_per_frame=1,
+        min_forward_offset=1,
+        max_forward_offset=30,
+        seed=42,
+    )
+    assert len(dataset_exhaustive.fwd_pairs) > 0
+    for _, t, j, _ in dataset_exhaustive.fwd_pairs:
+        assert expected_start <= t < expected_end
+        assert expected_start < j < expected_end
+        assert t not in lower_buffer_frames
+        assert j not in lower_buffer_frames
+        assert t not in upper_buffer_frames
+        assert j not in upper_buffer_frames
+
+
+def test_straight_path_short_video_without_valid_frames_skipped(
+    tmp_path: Path,
+) -> None:
+    """Verify that a video too short to afford both buffer margins is skipped.
+
+    If a video has num_frames <= 2 * buffer_frames, no valid pair can be formed
+    outside the margins. The loader must not fall back to unpruned sampling.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    fwd_dir = tmp_path / "short_fwd"
+    rot_dir = tmp_path / "short_rot"
+    fwd_dir.mkdir(parents=True)
+    rot_dir.mkdir(parents=True)
+
+    # 80 frames is less than 2 * 48 = 96 frames needed for buffer margins
+    _create_synthetic_video(fwd_dir / "short.mp4", num_frames=80, fps=60.0)
+    _create_synthetic_video(rot_dir / "rot.mp4", num_frames=120, fps=60.0)
+
+    with pytest.raises(ValueError, match="No valid forward frame pairs"):
+        DualSourceVideoDataset(
+            one_path_dir=fwd_dir,
+            rotation_dir=rot_dir,
+            video_fps=60.0,
+            straight_video_speed_mps=2.5,
+            buffer_distance_meters=2.0,
+        )
