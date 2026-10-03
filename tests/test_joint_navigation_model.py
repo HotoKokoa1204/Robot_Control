@@ -383,11 +383,11 @@ def test_load_pretrained_warm_start(tmp_path: Path) -> None:
         latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
     )
     with torch.no_grad():
-        src_fwd.fc_in.weight.fill_(0.84)
+        src_fwd.blocks[0].fc1.weight.fill_(0.84)
     model.load_forward_pretrained(src_fwd.state_dict(), strict=True)
     assert torch.allclose(
-        model.forward_transformer.fc_in.weight,
-        torch.full_like(model.forward_transformer.fc_in.weight, 0.84),
+        model.forward_transformer.blocks[0].fc1.weight,
+        torch.full_like(model.forward_transformer.blocks[0].fc1.weight, 0.84),
     )
 
     # 5. Test rotation transformer warm-start
@@ -395,11 +395,11 @@ def test_load_pretrained_warm_start(tmp_path: Path) -> None:
         latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
     )
     with torch.no_grad():
-        src_rot.fc_in.weight.fill_(0.96)
+        src_rot.blocks[0].fc1.weight.fill_(0.96)
     model.load_rotation_pretrained(src_rot.state_dict(), strict=True)
     assert torch.allclose(
-        model.rotation_transformer.fc_in.weight,
-        torch.full_like(model.rotation_transformer.fc_in.weight, 0.96),
+        model.rotation_transformer.blocks[0].fc1.weight,
+        torch.full_like(model.rotation_transformer.blocks[0].fc1.weight, 0.96),
     )
 
     # 6. File not found error

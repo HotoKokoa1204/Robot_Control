@@ -7,6 +7,7 @@ img_height: 108
 img_width: 192
 video_fps: 60.0
 straight_video_speed_mps: 2.5
+buffer_distance_meters: 2.0
 recon_source: "random"
 use_dummy_if_missing: true
 rotation_one_per_subfolder: true # Pick at most 1 rotation video per subfolder in data/360
@@ -32,6 +33,7 @@ beta_kl: 0.0001
 w_fwd: 1.0
 w_rot: 1.0
 w_recon: 1.0
+w_latent: 1.0
 
 # Checkpoints and output settings
 output_dir: "checkpoints"

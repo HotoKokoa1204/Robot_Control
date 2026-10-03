@@ -171,6 +171,11 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
         min_distance: float = 0.05,
         max_distance: float = 3.0,
         recon_source: str = "forward",
+        buffer_distance_meters: float = 2.0,
+        buffer_frames: Optional[int] = None,
+        video_fps: float = 60.0,
+        straight_video_speed_mps: float = 2.5,
+        step_distance_meters: Optional[float] = None,
         seed: Optional[int] = None,
     ) -> None:
         """Initialize DummyDualSourceVideoDataset.
@@ -183,6 +188,14 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
             max_distance: Maximum forward displacement in meters.
             recon_source: Modality supplying reconstruction frame ('forward',
                 'rotation', or 'random').
+            buffer_distance_meters: Physical margin in meters to exclude from
+                video ends to omit acceleration and deceleration zones. Defaults to 2.0.
+            buffer_frames: Frame margin to exclude from video ends. Overrides
+                buffer_distance_meters if specified.
+            video_fps: Video frame rate in frames per second.
+            straight_video_speed_mps: Robot cruise forward velocity in meters/sec.
+            step_distance_meters: Forward displacement per frame offset. If None,
+                computed as straight_video_speed_mps / video_fps.
             seed: Optional random seed for reproducible sample generation.
         """
         super().__init__()
@@ -192,6 +205,32 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
         self.min_distance = float(min_distance)
         self.max_distance = float(max_distance)
         self.recon_source = str(recon_source).lower()
+        self.video_fps = float(video_fps)
+        self.straight_video_speed_mps = float(straight_video_speed_mps)
+
+        if step_distance_meters is not None:
+            self.step_distance_meters = float(step_distance_meters)
+        else:
+            self.step_distance_meters = self.straight_video_speed_mps / max(
+                self.video_fps, 1.0
+            )
+
+        if buffer_frames is not None:
+            self.buffer_frames = max(0, int(buffer_frames))
+            self.buffer_distance_meters = self.buffer_frames * self.step_distance_meters
+        elif buffer_distance_meters is not None and buffer_distance_meters > 0:
+            self.buffer_distance_meters = float(buffer_distance_meters)
+            self.buffer_frames = int(
+                self.buffer_distance_meters / self.step_distance_meters
+            )
+        else:
+            self.buffer_distance_meters = (
+                float(buffer_distance_meters)
+                if buffer_distance_meters is not None
+                else 0.0
+            )
+            self.buffer_frames = 0
+
         self.seed = seed
         self._rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -318,7 +357,7 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
         max_forward_offset: int = 72,
         min_forward_offset: int = 1,
         max_rotation_offset: Optional[int] = None,
-        buffer_distance_meters: Optional[float] = None,
+        buffer_distance_meters: float = 2.0,
         buffer_frames: Optional[int] = None,
         samples_per_video: Optional[int] = 50,
         samples_per_frame: int = 1,
@@ -345,7 +384,7 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
             max_rotation_offset: Maximum frame offset between rotation pair frames.
                 If None, pairs cover full 360-degree rotation up to +-180 deg.
             buffer_distance_meters: Physical margin in meters to exclude from video
-                ends to omit acceleration and deceleration zones.
+                ends to omit acceleration and deceleration zones. Defaults to 2.0.
             buffer_frames: Frame margin to exclude from video ends. Overrides
                 buffer_distance_meters if specified.
             samples_per_video: Target number of pairs to sample per video. If None,
@@ -385,9 +424,18 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
 
         if buffer_frames is not None:
             self.buffer_frames = max(0, int(buffer_frames))
+            self.buffer_distance_meters = self.buffer_frames * self.step_distance_meters
         elif buffer_distance_meters is not None and buffer_distance_meters > 0:
-            self.buffer_frames = int(buffer_distance_meters / self.step_distance_meters)
+            self.buffer_distance_meters = float(buffer_distance_meters)
+            self.buffer_frames = int(
+                self.buffer_distance_meters / self.step_distance_meters
+            )
         else:
+            self.buffer_distance_meters = (
+                float(buffer_distance_meters)
+                if buffer_distance_meters is not None
+                else 0.0
+            )
             self.buffer_frames = 0
 
         self.max_forward_offset = max(1, int(max_forward_offset))
@@ -451,14 +499,14 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
 
             s = self.buffer_frames
             e = n_frames - self.buffer_frames
-            if e - s <= 1:
-                s, e = 0, n_frames
+            if e - s <= self.min_forward_offset:
+                continue
 
             if samples_per_video is not None:
                 for _ in range(samples_per_video):
-                    if e - 1 <= s:
+                    if e - 1 - self.min_forward_offset < s:
                         continue
-                    t = rng.randint(s, e - 2)
+                    t = rng.randint(s, e - 1 - self.min_forward_offset)
                     max_diff = min(e - 1 - t, self.max_forward_offset)
                     if max_diff < self.min_forward_offset:
                         continue
@@ -467,7 +515,7 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                     dist = offset * self.step_distance_meters
                     self.fwd_pairs.append((vp, t, j, dist))
             else:
-                for t in range(s, e - 1):
+                for t in range(s, e - self.min_forward_offset):
                     for _ in range(samples_per_frame):
                         max_diff = min(e - 1 - t, self.max_forward_offset)
                         if max_diff < self.min_forward_offset:

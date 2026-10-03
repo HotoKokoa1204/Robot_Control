@@ -47,6 +47,7 @@ def test_config_loading() -> None:
     assert cfg.img_height == 108
     assert cfg.img_width == 192
     assert cfg.preload_frames is False
+    assert float(cfg.buffer_distance_meters) == 2.0
 
     # Model architecture parameters
     assert cfg.latent_dim == 512
@@ -67,6 +68,7 @@ def test_config_loading() -> None:
     assert float(cfg.w_fwd) == 1.0
     assert float(cfg.w_rot) == 1.0
     assert float(cfg.w_recon) == 1.0
+    assert float(cfg.w_latent) == 1.0
 
     # Checkpoints
     assert cfg.output_dir == "checkpoints"
@@ -198,7 +200,16 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
     trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
 
     # Check telemetry keys
-    for key in ("loss", "recon", "fwd", "rot", "perc", "kl"):
+    for key in (
+        "loss",
+        "recon",
+        "fwd",
+        "rot",
+        "perc",
+        "kl",
+        "fwd_latent",
+        "rot_latent",
+    ):
         assert key in history
         assert len(history[key]) == 4
         assert all(math.isfinite(val) for val in history[key])
@@ -274,7 +285,7 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
         num_blocks=2,
         block_inner_dim=32,
     )
-    init_fwd_weight = model.forward_transformer.fc_in.weight.clone()
+    init_fwd_weight = model.forward_transformer.blocks[0].fc3.weight.clone()
 
     cfg = OmegaConf.create(
         {
@@ -301,7 +312,7 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
 
     trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
     assert not torch.allclose(
-        trained_model.forward_transformer.fc_in.weight.cpu(),
+        trained_model.forward_transformer.blocks[0].fc3.weight.cpu(),
         init_fwd_weight.cpu(),
     )
     assert len(history["loss"]) == 1
