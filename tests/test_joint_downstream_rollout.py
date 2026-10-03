@@ -537,7 +537,11 @@ def test_generate_video_forward_first_512(tmp_path: Path) -> None:
 def test_multistep_compound_rollout_preserves_latent_norm_and_luminance(
     tmp_path: Path,
 ) -> None:
-    """Verify multi-step compound rollout preserves latent norm and avoids collapse."""
+    """Verify multi-step compound rollout preserves latent norm and avoids collapse.
+
+    Args:
+        tmp_path: Temporary directory fixture provided by pytest.
+    """
     joint_model = JointNavigationModel(
         latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
     )

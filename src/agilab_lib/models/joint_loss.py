@@ -304,11 +304,11 @@ class JointNavigationLoss(nn.Module):
 
         mu_fwd_target = None
         if fwd_target is not None:
-            mu_fwd_target = model.vae.encode(fwd_target)[0]
+            mu_fwd_target = model.vae.encode(fwd_target)[0].detach()
 
         mu_rot_target = None
         if rot_target is not None:
-            mu_rot_target = model.vae.encode(rot_target)[0]
+            mu_rot_target = model.vae.encode(rot_target)[0].detach()
 
         return self.forward(
             recon_x=recon_x,

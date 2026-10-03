@@ -112,8 +112,7 @@ class BaseLatentTransformer(nn.Module):
     def reset_parameters(self) -> None:
         """Reset transformer residual blocks to identity zero-initialization."""
         for blk in self.blocks:
-            nn.init.zeros_(blk.fc3.weight)
-            nn.init.zeros_(blk.fc3.bias)
+            blk.reset_parameters()
 
     def _forward_blocks(self, latent: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """Forward pass directly through stacked conditioned residual blocks.
