@@ -19,14 +19,14 @@ from typing import Dict
 from PIL import Image  # isort: skip # noqa: F401
 
 import torch
+from omegaconf import OmegaConf
+
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.rlt import (
     ChainedLatentTransformer,
     ExecutionOrder,
 )
 from agilab_lib.models.vae import VAE
-from omegaconf import OmegaConf
-
 from scripts.generate_video import generate_video
 
 

@@ -12,6 +12,7 @@ from typing import Any, Dict
 from PIL import Image  # isort: skip # noqa: F401
 import pytest
 import torch
+
 from agilab_lib.models import (
     JointLossOutput,
     JointNavigationLoss,
