@@ -19,14 +19,14 @@ from typing import Dict
 from PIL import Image  # isort: skip # noqa: F401
 
 import torch
-from omegaconf import OmegaConf
-
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.rlt import (
     ChainedLatentTransformer,
     ExecutionOrder,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import OmegaConf
+
 from scripts.generate_video import generate_video
 
 
@@ -532,3 +532,60 @@ def test_generate_video_forward_first_512(tmp_path: Path) -> None:
     result_path = generate_video(cfg)
     assert Path(result_path).exists()
     assert Path(result_path).stat().st_size > 0
+
+
+def test_multistep_compound_rollout_preserves_latent_norm_and_luminance(
+    tmp_path: Path,
+) -> None:
+    """Verify multi-step compound rollout preserves latent norm and avoids collapse."""
+    joint_model = JointNavigationModel(
+        latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
+    )
+    ckpts = export_test_checkpoints(joint_model, tmp_path / "ckpts_multistep")
+
+    standalone_vae = VAE(latent_dim=512)
+    standalone_vae.load_state_dict(
+        torch.load(ckpts["vae"], map_location="cpu", weights_only=True)
+    )
+    standalone_vae.eval()
+
+    chained = ChainedLatentTransformer(
+        latent_dim=512,
+        hidden_dim=512,
+        forward_num_blocks=5,
+        rotation_num_blocks=5,
+        block_inner_dim=512,
+        rotation_checkpoint=ckpts["rotation"],
+        forward_checkpoint=ckpts["forward"],
+    )
+    chained.eval()
+
+    # Synthetic realistic-ish image tensor in [0.2, 0.8] range
+    torch.manual_seed(42)
+    x0 = torch.rand(1, 3, 108, 192) * 0.6 + 0.2
+
+    with torch.no_grad():
+        z = standalone_vae.get_latent(x0)
+        initial_norm = torch.norm(z, dim=-1).item()
+        initial_frame = standalone_vae.decode(z)
+        initial_mean_luminance = initial_frame.mean().item()
+
+        # Step through 5 compound rollouts with zero-init direct-stream model
+        current_z = z
+        for _ in range(5):
+            current_z = chained(
+                current_z,
+                angle_deg=15.0,
+                distance_meters=0.5,
+                execution_order=ExecutionOrder.ROTATE_FIRST,
+            )
+            current_norm = torch.norm(current_z, dim=-1).item()
+            # Norm must stay exactly identical at initialization
+            assert abs(current_norm - initial_norm) < 1e-5
+
+        final_frame = standalone_vae.decode(current_z)
+        final_mean_luminance = final_frame.mean().item()
+
+        # Decoded frames must be identical - zero illumination decay or collapse
+        assert abs(final_mean_luminance - initial_mean_luminance) < 1e-5
+        assert torch.allclose(final_frame, initial_frame, atol=1e-5)
