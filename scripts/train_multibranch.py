@@ -24,8 +24,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -34,6 +32,7 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -77,6 +76,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
                 int(samples_per_vid_cfg) if samples_per_vid_cfg is not None else None
             )
 
+            buffer_dist = float(cfg.get("buffer_distance_meters", 2.0))
             dataset = DualSourceVideoDataset(
                 one_path_dir=one_path_dir,
                 rotation_dir=rotation_dir,
@@ -86,6 +86,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
                 straight_video_speed_mps=float(
                     cfg.get("straight_video_speed_mps", 2.5)
                 ),
+                buffer_distance_meters=buffer_dist,
                 max_videos_per_source=max_vids_val,
                 samples_per_video=samples_per_vid_val,
                 num_samples=num_samples_val,
@@ -123,6 +124,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
         img_height=int(cfg.get("img_height", 108)),
         img_width=int(cfg.get("img_width", 192)),
         recon_source=recon_source,
+        buffer_distance_meters=float(cfg.get("buffer_distance_meters", 2.0)),
         seed=cfg.get("seed", 42),
     )
 
@@ -261,6 +263,7 @@ def train_multibranch(
         w_fwd = float(cfg.get("w_fwd", 1.0))
         w_rot = float(cfg.get("w_rot", 1.0))
         w_recon = float(cfg.get("w_recon", 1.0))
+        w_latent = float(cfg.get("w_latent", 1.0))
         pretrained_vgg = bool(cfg.get("pretrained_vgg", True))
         loss_fn = JointNavigationLoss(
             alpha_perc=alpha_perc,
@@ -268,6 +271,7 @@ def train_multibranch(
             w_fwd=w_fwd,
             w_rot=w_rot,
             w_recon=w_recon,
+            w_latent=w_latent,
             pretrained_vgg=pretrained_vgg,
         )
 
@@ -298,6 +302,8 @@ def train_multibranch(
         "rot": [],
         "perc": [],
         "kl": [],
+        "fwd_latent": [],
+        "rot_latent": [],
     }
 
     print(
@@ -315,6 +321,8 @@ def train_multibranch(
         epoch_rot = 0.0
         epoch_perc = 0.0
         epoch_kl = 0.0
+        epoch_fwd_latent = 0.0
+        epoch_rot_latent = 0.0
         num_batches = len(train_loader)
 
         batch_iter = tqdm(
@@ -354,6 +362,8 @@ def train_multibranch(
             ).item()
             epoch_perc += perc_val
             epoch_kl += loss_output.metrics["recon_kl"].item()
+            epoch_fwd_latent += loss_output.metrics["fwd_latent_mse"].item()
+            epoch_rot_latent += loss_output.metrics["rot_latent_mse"].item()
 
             # Gradient accumulation scaling and backward pass
             is_accum_step = (batch_idx + 1) % accum_steps == 0
@@ -384,6 +394,8 @@ def train_multibranch(
         avg_rot = epoch_rot / n_b
         avg_perc = epoch_perc / n_b
         avg_kl = epoch_kl / n_b
+        avg_fwd_latent = epoch_fwd_latent / n_b
+        avg_rot_latent = epoch_rot_latent / n_b
 
         history["loss"].append(avg_loss)
         history["recon"].append(avg_recon)
@@ -391,6 +403,8 @@ def train_multibranch(
         history["rot"].append(avg_rot)
         history["perc"].append(avg_perc)
         history["kl"].append(avg_kl)
+        history["fwd_latent"].append(avg_fwd_latent)
+        history["rot_latent"].append(avg_rot_latent)
 
         if (epoch + 1) % 1 == 0 or (epoch + 1) == max_epochs:
             print(
@@ -400,7 +414,9 @@ def train_multibranch(
                 f"Fwd: {avg_fwd:.4f} | "
                 f"Rot: {avg_rot:.4f} | "
                 f"Perc: {avg_perc:.4f} | "
-                f"KL: {avg_kl:.6f}",
+                f"KL: {avg_kl:.6f} | "
+                f"FwdLat: {avg_fwd_latent:.6f} | "
+                f"RotLat: {avg_rot_latent:.6f}",
                 flush=True,
             )
 

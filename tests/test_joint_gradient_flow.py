@@ -12,7 +12,6 @@ from typing import Any, Dict
 from PIL import Image  # isort: skip # noqa: F401
 import pytest
 import torch
-
 from agilab_lib.models import (
     JointLossOutput,
     JointNavigationLoss,
@@ -60,20 +59,32 @@ def test_joint_gradient_flow_primary_seam() -> None:
     Also verifies frozen VGG-16 parameters receive no gradients.
     """
     model = JointNavigationModel()
-    loss_fn = JointNavigationLoss(alpha_perc=0.5, beta_kl=0.0001)
+    # Initialize non-zero residual weights to verify end-to-end gradient propagation
+    # across deep feedforward layers of residual blocks
+    with torch.no_grad():
+        for blk in model.forward_transformer.blocks:
+            torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
+            torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
+        for blk in model.rotation_transformer.blocks:
+            torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
+            torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
+
+    loss_fn = JointNavigationLoss(alpha_perc=0.5, beta_kl=0.0001, w_latent=1.0)
 
     batch = _generate_synthetic_batch(batch_size=2)
 
     # Execute all 3 branches
     recon_x, mu_t, logvar_t = model.forward_reconstruction(batch["recon_frame"])
-    pred_fwd, _, _ = model.forward_translation(
+    pred_fwd, pred_fwd_latent, _ = model.forward_translation(
         x_t=batch["fwd_current"],
         distance_meters=batch["fwd_distance"],
     )
-    pred_rot, _, _ = model.forward_rotation(
+    pred_rot, pred_rot_latent, _ = model.forward_rotation(
         x_t=batch["rot_current"],
         sin_cos=batch["rot_sin_cos"],
     )
+    mu_fwd_target = model.vae.encode(batch["fwd_target"])[0]
+    mu_rot_target = model.vae.encode(batch["rot_target"])[0]
 
     # Compute loss via explicit keyword arguments
     total_loss, metrics = loss_fn(
@@ -85,6 +96,10 @@ def test_joint_gradient_flow_primary_seam() -> None:
         target_fwd=batch["fwd_target"],
         pred_rot=pred_rot,
         target_rot=batch["rot_target"],
+        pred_fwd_latent=pred_fwd_latent,
+        mu_fwd_target=mu_fwd_target,
+        pred_rot_latent=pred_rot_latent,
+        mu_rot_target=mu_rot_target,
     )
 
     assert torch.isfinite(total_loss)
@@ -158,8 +173,8 @@ def test_joint_loss_via_forward_model_and_batch_dict() -> None:
     # Verify gradients reached all 4 networks
     assert model.vae.encoder_cnn[0].weight.grad is not None
     assert model.vae.decoder_cnn[0].weight.grad is not None
-    assert model.forward_transformer.fc_in.weight.grad is not None
-    assert model.rotation_transformer.fc_in.weight.grad is not None
+    assert model.forward_transformer.blocks[0].fc3.weight.grad is not None
+    assert model.rotation_transformer.blocks[0].fc3.weight.grad is not None
 
 
 def test_joint_loss_via_predictions_and_targets_dict() -> None:
@@ -169,14 +184,16 @@ def test_joint_loss_via_predictions_and_targets_dict() -> None:
 
     batch = _generate_synthetic_batch(batch_size=2)
     recon_x, mu_t, logvar_t = model.forward_reconstruction(batch["recon_frame"])
-    pred_fwd, _, _ = model.forward_translation(
+    pred_fwd, pred_fwd_latent, _ = model.forward_translation(
         x_t=batch["fwd_current"],
         distance_meters=batch["fwd_distance"],
     )
-    pred_rot, _, _ = model.forward_rotation(
+    pred_rot, pred_rot_latent, _ = model.forward_rotation(
         x_t=batch["rot_current"],
         sin_cos=batch["rot_sin_cos"],
     )
+    mu_fwd_target = model.vae.encode(batch["fwd_target"])[0]
+    mu_rot_target = model.vae.encode(batch["rot_target"])[0]
 
     preds: Dict[str, Any] = {
         "recon_x": recon_x,
@@ -184,12 +201,16 @@ def test_joint_loss_via_predictions_and_targets_dict() -> None:
         "logvar_t": logvar_t,
         "pred_fwd": pred_fwd,
         "pred_rot": pred_rot,
+        "pred_fwd_latent": pred_fwd_latent,
+        "pred_rot_latent": pred_rot_latent,
     }
 
     targets: Dict[str, Any] = {
         "recon_frame": batch["recon_frame"],
         "fwd_target": batch["fwd_target"],
         "rot_target": batch["rot_target"],
+        "mu_fwd_target": mu_fwd_target,
+        "mu_rot_target": mu_rot_target,
     }
 
     total_loss, metrics = loss_fn(preds, targets)
@@ -197,6 +218,8 @@ def test_joint_loss_via_predictions_and_targets_dict() -> None:
     assert "loss_recon" in metrics
     assert "loss_fwd" in metrics
     assert "loss_rot" in metrics
+    assert "fwd_latent_mse" in metrics
+    assert "rot_latent_mse" in metrics
 
     model.zero_grad()
     total_loss.backward()
@@ -322,9 +345,11 @@ def test_metrics_dictionary_contents() -> None:
         "loss_fwd",
         "fwd_mse",
         "fwd_perc",
+        "fwd_latent_mse",
         "loss_rot",
         "rot_mse",
         "rot_perc",
+        "rot_latent_mse",
     ]
     for key in required_keys:
         assert key in metrics, f"Missing metric key: {key}"
@@ -444,7 +469,7 @@ def test_cuda_gradient_flow() -> None:
     # Check CUDA gradients
     assert model.vae.encoder_cnn[0].weight.grad is not None
     assert model.vae.encoder_cnn[0].weight.grad.is_cuda
-    assert model.forward_transformer.fc_in.weight.grad is not None
-    assert model.forward_transformer.fc_in.weight.grad.is_cuda
-    assert model.rotation_transformer.fc_in.weight.grad is not None
-    assert model.rotation_transformer.fc_in.weight.grad.is_cuda
+    assert model.forward_transformer.blocks[0].fc3.weight.grad is not None
+    assert model.forward_transformer.blocks[0].fc3.weight.grad.is_cuda
+    assert model.rotation_transformer.blocks[0].fc3.weight.grad is not None
+    assert model.rotation_transformer.blocks[0].fc3.weight.grad.is_cuda
