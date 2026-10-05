@@ -4,8 +4,9 @@ Stage: Test
 Author: KafuuChino
 Date: 2026-09-29
 Description: Integration and unit tests for joint multi-branch training script,
-    verifying Hydra config loading, AMP execution, gradient accumulation,
-    telemetry logging, and standalone checkpoint exports.
+    verifying Hydra config loading, three-stage curricular execution, AMP execution,
+    gradient accumulation, telemetry logging, loss curve plotting, and milestone
+    checkpoint exports.
 """
 
 import math
@@ -16,8 +17,6 @@ from PIL import Image  # isort: skip # noqa: F401
 
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
@@ -27,8 +26,11 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import DictConfig, OmegaConf
+
 from scripts.train_multibranch import (
     get_dataset,
+    plot_loss_curves,
     save_all_checkpoints,
     train_multibranch,
 )
@@ -57,11 +59,16 @@ def test_config_loading() -> None:
 
     # Optimization parameters
     assert float(cfg.lr) == 1e-4
+    assert float(cfg.lr_vae_stage1) == 1e-4
+    assert float(cfg.lr_vae_stage3) == 1e-5
     assert float(cfg.lr_vae) == 1e-5
     assert cfg.batch_size == 16
     assert cfg.gradient_accumulation_steps == 2
     assert cfg.use_amp is True
-    assert cfg.max_epochs == 100
+    assert cfg.max_epochs == 150
+    assert cfg.stage1_epochs == 50
+    assert cfg.stage2_epochs == 50
+    assert cfg.stage3_epochs == 50
     assert cfg.warmup_vae_epochs == 50
 
     # Multi-branch loss weights
@@ -161,6 +168,24 @@ def test_save_all_checkpoints_export(tmp_path: Path) -> None:
     loaded_rot.load_state_dict(
         torch.load(paths["rotation"], map_location="cpu", weights_only=True)
     )
+
+
+def test_plot_loss_curves(tmp_path: Path) -> None:
+    """Verify plot_loss_curves generates valid image file."""
+    history = {
+        "loss": [1.0, 0.8, 0.6],
+        "recon": [0.5, 0.0, 0.3],
+        "fwd": [0.0, 0.4, 0.2],
+        "rot": [0.0, 0.3, 0.1],
+        "perc": [0.2, 0.1, 0.05],
+        "kl": [0.01, 0.0, 0.005],
+        "fwd_latent": [0.0, 0.05, 0.02],
+        "rot_latent": [0.0, 0.04, 0.01],
+    }
+    plot_path = plot_loss_curves(history, tmp_path)
+    assert plot_path is not None
+    assert plot_path.exists()
+    assert plot_path.stat().st_size > 0
 
 
 def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
@@ -376,9 +401,105 @@ def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
     trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
     assert len(history["loss"]) == 4
     # In Stage 1 (epoch 1 and 2), dynamics loss should be 0
-    # because stage1_recon_only is active
+    # because Stage 1 reconstruction-only is active
     assert history["fwd"][0] == 0.0
     assert history["rot"][0] == 0.0
     # In Stage 2 (epoch 3 and 4), dynamics loss should be active (> 0)
     assert history["fwd"][2] > 0.0
     assert history["rot"][2] > 0.0
+
+
+def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None:
+    """Verify three-stage curriculum execution, boundary hooks, and milestones."""
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=4,
+        img_height=108,
+        img_width=192,
+        seed=42,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+
+    out_dir = tmp_path / "three_stage_out"
+    cfg = OmegaConf.create(
+        {
+            "latent_dim": 64,
+            "hidden_dim": 32,
+            "num_blocks": 2,
+            "block_inner_dim": 32,
+            "lr": 1e-4,
+            "lr_vae_stage1": 1e-4,
+            "lr_vae_stage3": 1e-5,
+            "batch_size": 2,
+            "gradient_accumulation_steps": 1,
+            "use_amp": False,
+            "max_epochs": 3,
+            "stage1_epochs": 1,
+            "stage2_epochs": 1,
+            "stage3_epochs": 1,
+            "w_latent": 1.0,
+            "sanity_check_min_std": 0.1,  # Low threshold for dummy images
+            "alpha_perc": 0.5,
+            "beta_kl": 0.0001,
+            "w_fwd": 1.0,
+            "w_rot": 1.0,
+            "w_recon": 1.0,
+            "output_dir": str(out_dir),
+            "save_interval_epochs": 1,
+            "vae_checkpoint": None,
+            "device": "cpu",
+        }
+    )
+
+    trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
+    assert len(history["loss"]) == 3
+
+    # Stage 1 (epoch 0): Recon active, Dynamics inactive
+    assert history["recon"][0] > 0.0
+    assert history["fwd"][0] == 0.0
+    assert history["rot"][0] == 0.0
+
+    # Stage 2 (epoch 1): Recon inactive, Dynamics active
+    assert history["recon"][1] == 0.0
+    assert history["fwd"][1] > 0.0
+    assert history["rot"][1] > 0.0
+
+    # Stage 3 (epoch 2): Both Recon and Dynamics active
+    assert history["recon"][2] > 0.0
+    assert history["fwd"][2] > 0.0
+    assert history["rot"][2] > 0.0
+
+    # Milestone checkpoints verification
+    stage1_ckpt = out_dir / "stage1_vae.pt"
+    stage2_ckpt = out_dir / "stage2_transformers.pt"
+    joint_ckpt = out_dir / "joint_navigation_model.pt"
+    final_joint_ckpt = out_dir / "final_joint_model.pt"
+    loss_curves_plot = out_dir / "loss_curves.png"
+
+    assert stage1_ckpt.exists()
+    assert stage2_ckpt.exists()
+    assert joint_ckpt.exists()
+    assert final_joint_ckpt.exists()
+    assert loss_curves_plot.exists()
+
+    # Verify stage1 checkpoint can load into standalone VAE
+    loaded_vae = VAE(latent_dim=64)
+    loaded_vae.load_state_dict(
+        torch.load(stage1_ckpt, map_location="cpu", weights_only=True)
+    )
+
+    # Verify stage2 checkpoint contains both transformer state dicts
+    stage2_payload = torch.load(stage2_ckpt, map_location="cpu", weights_only=True)
+    assert "forward_transformer" in stage2_payload
+    assert "rotation_transformer" in stage2_payload
+
+    # Verify parameter state after stage 3: VAE trainable, transformers frozen
+    assert trained_model.vae.fc_mu.weight.requires_grad is True
+    assert trained_model.forward_transformer.blocks[0].fc1.weight.requires_grad is False
+    assert (
+        trained_model.rotation_transformer.blocks[0].fc1.weight.requires_grad is False
+    )

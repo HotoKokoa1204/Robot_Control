@@ -4,7 +4,8 @@ Stage: Script
 Author: KafuuChino
 Date: 2026-09-29
 Description: Joint multi-branch training script for end-to-end latent navigation
-    learning with AMP, gradient accumulation, and standalone weight exports.
+    learning with three-stage curriculum, AMP, gradient accumulation, and
+    standalone weight exports.
 """
 
 import sys
@@ -24,8 +25,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -34,6 +33,7 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -130,6 +130,112 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
     )
 
 
+def plot_loss_curves(
+    history: Dict[str, List[float]],
+    output_dir: Union[str, Path],
+) -> Optional[Path]:
+    """Plot and save training loss curves across all epochs and stages.
+
+    Visualizes total loss, reconstruction, dynamics (forward/rotation),
+    latent dynamics alignment MSE, and regularization (perceptual/KL).
+
+    Args:
+        history: Dictionary mapping metric names to lists of epoch averages.
+        output_dir: Destination folder path for loss_curves.png.
+
+    Returns:
+        Path to the saved loss_curves.png plot, or None if matplotlib is unavailable.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    epochs_list = history.get("loss", [])
+    if not epochs_list:
+        return None
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    plot_file = out_path / "loss_curves.png"
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    epochs = list(range(1, len(epochs_list) + 1))
+
+    # Subplot 1: Total loss & Recon loss
+    axes[0, 0].plot(
+        epochs, history.get("loss", []), label="Total Loss", color="tab:blue"
+    )
+    axes[0, 0].plot(
+        epochs,
+        history.get("recon", []),
+        label="Recon Loss",
+        color="tab:orange",
+        linestyle="--",
+    )
+    axes[0, 0].set_title("Total & Reconstruction Loss")
+    axes[0, 0].set_xlabel("Epoch")
+    axes[0, 0].set_ylabel("Loss")
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Subplot 2: Dynamics losses (Fwd & Rot)
+    axes[0, 1].plot(
+        epochs, history.get("fwd", []), label="Forward Loss", color="tab:green"
+    )
+    axes[0, 1].plot(
+        epochs, history.get("rot", []), label="Rotation Loss", color="tab:red"
+    )
+    axes[0, 1].set_title("Dynamics Losses")
+    axes[0, 1].set_xlabel("Epoch")
+    axes[0, 1].set_ylabel("Loss")
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Subplot 3: Latent MSE losses
+    axes[1, 0].plot(
+        epochs,
+        history.get("fwd_latent", []),
+        label="Fwd Latent MSE",
+        color="tab:cyan",
+    )
+    axes[1, 0].plot(
+        epochs,
+        history.get("rot_latent", []),
+        label="Rot Latent MSE",
+        color="tab:pink",
+    )
+    axes[1, 0].set_title("Latent Dynamics Alignment")
+    axes[1, 0].set_xlabel("Epoch")
+    axes[1, 0].set_ylabel("MSE")
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # Subplot 4: Regularization (KL & Perceptual)
+    axes[1, 1].plot(
+        epochs,
+        history.get("perc", []),
+        label="Perceptual Loss",
+        color="tab:purple",
+    )
+    axes[1, 1].plot(
+        epochs, history.get("kl", []), label="KL Divergence", color="tab:brown"
+    )
+    axes[1, 1].set_title("Perceptual & KL Regularization")
+    axes[1, 1].set_xlabel("Epoch")
+    axes[1, 1].set_ylabel("Loss")
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(plot_file, dpi=150)
+    plt.close(fig)
+    return plot_file
+
+
 def save_all_checkpoints(
     model: JointNavigationModel,
     output_dir: Union[str, Path],
@@ -138,9 +244,10 @@ def save_all_checkpoints(
 
     Saves:
     1. Composite model weights: joint_navigation_model.pt
-    2. Standalone VAE weights: vae_512.pt
-    3. Standalone forward transformer weights: forward_transformer.pt
-    4. Standalone rotation transformer weights: rotation_transformer.pt
+    2. Final joint model weights alias: final_joint_model.pt
+    3. Standalone VAE weights: vae_512.pt
+    4. Standalone forward transformer weights: forward_transformer.pt
+    5. Standalone rotation transformer weights: rotation_transformer.pt
 
     Args:
         model: JointNavigationModel instance.
@@ -154,6 +261,9 @@ def save_all_checkpoints(
 
     composite_path = out_path / "joint_navigation_model.pt"
     torch.save(model.state_dict(), composite_path)
+
+    final_joint_path = out_path / "final_joint_model.pt"
+    torch.save(model.state_dict(), final_joint_path)
 
     vae_path = out_path / "vae_512.pt"
     model.export_vae_checkpoint(vae_path)
@@ -184,7 +294,18 @@ def train_multibranch(
     model: Optional[JointNavigationModel] = None,
     loss_fn: Optional[JointNavigationLoss] = None,
 ) -> Tuple[JointNavigationModel, Dict[str, List[float]]]:
-    """Execute end-to-end multi-branch training loop with AMP and gradient accumulation.
+    """Execute end-to-end multi-branch training loop with three-stage curriculum.
+
+    Curriculum stages:
+    - Stage 1 (Autoencoder Warm-up): model.vae trained at lr_vae_stage1;
+      transformers frozen. Sanity gate validated at stage 1 boundary,
+      saving stage1_vae.pt.
+    - Stage 2 (Transformer Dynamics Optimization): model.vae frozen;
+      transformers trained at lr with w_latent=1.0. Saves stage2_transformers.pt
+      at stage 2 boundary.
+    - Stage 3 (Autoencoder Manifold Refinement): transformers frozen;
+      model.vae fine-tuned at lr_vae_stage3. Final checkpoints and loss curves
+      exported at completion.
 
     Args:
         cfg: Configuration parameters dictionary.
@@ -197,6 +318,7 @@ def train_multibranch(
 
     Raises:
         ValueError: If training dataset is empty.
+        RuntimeError: If Stage 1 sanity gate check fails.
     """
     # 1. Device configuration
     device_cfg = cfg.get("device", None)
@@ -278,27 +400,91 @@ def train_multibranch(
 
     loss_fn.to(device)
 
-    # 5. Optimizer and curriculum configuration
+    # 5. Optimizer and curriculum hyperparameters
     lr = float(cfg.get("lr", 1e-4))
-    lr_vae = float(cfg.get("lr_vae", 1e-5))
-    warmup_vae_epochs = int(cfg.get("warmup_vae_epochs", 50))
+    lr_vae_stage1 = float(cfg.get("lr_vae_stage1", lr))
+    lr_vae_stage3 = float(cfg.get("lr_vae_stage3", cfg.get("lr_vae", 1e-5)))
+
+    max_epochs = int(cfg.get("max_epochs", 150))
+    if "stage1_epochs" in cfg and cfg.get("stage1_epochs") is not None:
+        stage1_epochs = int(cfg["stage1_epochs"])
+        stage2_epochs = int(cfg.get("stage2_epochs", 50))
+        stage3_epochs = int(cfg.get("stage3_epochs", 50))
+    elif "warmup_vae_epochs" in cfg and cfg.get("warmup_vae_epochs") is not None:
+        stage1_epochs = int(cfg["warmup_vae_epochs"])
+        if "stage2_epochs" in cfg and cfg.get("stage2_epochs") is not None:
+            stage2_epochs = int(cfg["stage2_epochs"])
+            stage3_epochs = int(
+                cfg.get(
+                    "stage3_epochs",
+                    max(0, max_epochs - stage1_epochs - stage2_epochs),
+                )
+            )
+        else:
+            stage2_epochs = max(0, max_epochs - stage1_epochs)
+            stage3_epochs = 0
+    else:
+        stage1_epochs = 50
+        stage2_epochs = 50
+        stage3_epochs = 50
+
+    target_w_latent = float(cfg.get("w_latent", 1.0))
+    legacy_ramp = (
+        stage3_epochs == 0
+        and "w_latent_ramp_start_epoch" in cfg
+        and cfg.get("w_latent_ramp_start_epoch") is not None
+        and "stage1_epochs" not in cfg
+    )
     w_latent_min = float(cfg.get("w_latent_min", 0.01))
     w_latent_max = float(cfg.get("w_latent_max", 1.0))
-    w_latent_ramp_start_epoch = int(cfg.get("w_latent_ramp_start_epoch", 61))
+    ramp_start = int(cfg.get("w_latent_ramp_start_epoch", 61))
     sanity_check_min_std = float(cfg.get("sanity_check_min_std", 15.0))
 
-    def build_optimizer(is_stage2: bool) -> torch.optim.Optimizer:
-        if not is_stage2:
-            return torch.optim.Adam(model.parameters(), lr=lr)
-        param_groups = [
-            {"params": model.vae.parameters(), "lr": lr_vae},
-            {"params": model.forward_transformer.parameters(), "lr": lr},
-            {"params": model.rotation_transformer.parameters(), "lr": lr},
-        ]
-        return torch.optim.Adam(param_groups)
+    def get_stage_for_epoch(epoch_idx: int) -> int:
+        if epoch_idx < stage1_epochs:
+            return 1
+        elif epoch_idx < stage1_epochs + stage2_epochs:
+            return 2
+        else:
+            return 3
 
-    is_stage2 = warmup_vae_epochs <= 0
-    optimizer = build_optimizer(is_stage2)
+    def setup_stage_and_optimizer(stage_num: int) -> Tuple[torch.optim.Optimizer, str]:
+        if stage_num == 1:
+            model.vae.requires_grad_(True)
+            model.forward_transformer.requires_grad_(False)
+            model.rotation_transformer.requires_grad_(False)
+            trainable_params = [p for p in model.vae.parameters() if p.requires_grad]
+            stage_opt = torch.optim.Adam(trainable_params, lr=lr_vae_stage1)
+            desc = "Stage 1 (Autoencoder Warm-up)"
+            print(
+                f"\n=== Entering Stage 1: Autoencoder Warm-up (LR: {lr_vae_stage1}) ==="
+            )
+        elif stage_num == 2:
+            model.vae.requires_grad_(False)
+            model.forward_transformer.requires_grad_(True)
+            model.rotation_transformer.requires_grad_(True)
+            trainable_params = [
+                p for p in model.forward_transformer.parameters() if p.requires_grad
+            ] + [p for p in model.rotation_transformer.parameters() if p.requires_grad]
+            stage_opt = torch.optim.Adam(trainable_params, lr=lr)
+            desc = "Stage 2 (Transformer Dynamics)"
+            print(f"\n=== Entering Stage 2: Transformer Dynamics (LR: {lr}) ===")
+        else:  # stage_num == 3
+            model.vae.requires_grad_(True)
+            model.forward_transformer.requires_grad_(False)
+            model.rotation_transformer.requires_grad_(False)
+            trainable_params = [p for p in model.vae.parameters() if p.requires_grad]
+            stage_opt = torch.optim.Adam(trainable_params, lr=lr_vae_stage3)
+            desc = "Stage 3 (Autoencoder Refinement)"
+            print(
+                f"\n=== Entering Stage 3: Autoencoder Refinement "
+                f"(LR: {lr_vae_stage3}) ==="
+            )
+        return stage_opt, desc
+
+    active_stage: int = get_stage_for_epoch(0)
+    optimizer, stage_desc = setup_stage_and_optimizer(active_stage)
+    optimizer.zero_grad()
 
     # 6. AMP and Gradient Accumulation setup
     use_amp = bool(cfg.get("use_amp", True))
@@ -308,11 +494,11 @@ def train_multibranch(
     accum_steps = max(1, int(cfg.get("gradient_accumulation_steps", 2)))
 
     # 7. Training loop parameters and telemetry tracking
-    max_epochs = int(cfg.get("max_epochs", 100))
     save_interval = int(cfg.get("save_interval_epochs", 5))
     output_dir = DualSourceVideoDataset._resolve_dir(
         cfg.get("output_dir", "checkpoints")
     )
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     history: Dict[str, List[float]] = {
         "loss": [],
@@ -326,36 +512,35 @@ def train_multibranch(
     }
 
     print(
-        f"Starting training for {max_epochs} epochs "
-        f"(warmup_vae_epochs={warmup_vae_epochs}, batch_size={batch_size}, "
-        f"accum_steps={accum_steps}, use_amp={use_amp})..."
+        f"Starting three-stage training for {max_epochs} epochs "
+        f"(Stage1: {stage1_epochs}, Stage2: {stage2_epochs}, Stage3: {stage3_epochs}, "
+        f"batch_size={batch_size}, accum_steps={accum_steps}, use_amp={use_amp})..."
     )
 
-    optimizer.zero_grad()
     for epoch in range(max_epochs):
         epoch_num = epoch + 1
-        current_in_stage1 = epoch_num <= warmup_vae_epochs
+        current_stage = get_stage_for_epoch(epoch)
 
         # Check stage transition at boundary
-        if not current_in_stage1 and not is_stage2:
-            print(
-                f"\n=== Transitioning to Stage 2 at Epoch {epoch_num} ===\n"
-                f"Unfreezing full model with discriminative LR: "
-                f"VAE={lr_vae}, Transformers={lr}"
-            )
-            is_stage2 = True
-            optimizer = build_optimizer(is_stage2)
+        if current_stage != active_stage:
+            active_stage = current_stage
+            optimizer, stage_desc = setup_stage_and_optimizer(current_stage)
             optimizer.zero_grad()
 
         # Compute dynamic w_latent for current epoch
-        if current_in_stage1:
-            current_w_latent = 0.0
-        elif epoch_num < w_latent_ramp_start_epoch:
-            current_w_latent = w_latent_min
+        if legacy_ramp:
+            if current_stage == 1:
+                current_w_latent = 0.0
+            elif epoch_num < ramp_start:
+                current_w_latent = w_latent_min
+            else:
+                denom = max(1, max_epochs - ramp_start)
+                progress = min(1.0, (epoch_num - ramp_start) / denom)
+                current_w_latent = w_latent_min + progress * (
+                    w_latent_max - w_latent_min
+                )
         else:
-            denom = max(1, max_epochs - w_latent_ramp_start_epoch)
-            progress = min(1.0, (epoch_num - w_latent_ramp_start_epoch) / denom)
-            current_w_latent = w_latent_min + progress * (w_latent_max - w_latent_min)
+            current_w_latent = 0.0 if current_stage == 1 else target_w_latent
 
         loss_fn.w_latent = current_w_latent
 
@@ -370,9 +555,8 @@ def train_multibranch(
         epoch_rot_latent = 0.0
         num_batches = len(train_loader)
 
-        stage_desc = "Stage 1 (VAE)" if current_in_stage1 else "Stage 2 (Joint)"
         iter_desc = (
-            f"{stage_desc} Ep {epoch_num:2d}/{max_epochs} "
+            f"Ep {epoch_num:3d}/{max_epochs} [{stage_desc}] "
             f"[w_lat={current_w_latent:.3f}]"
         )
         batch_iter = tqdm(
@@ -397,9 +581,7 @@ def train_multibranch(
             with torch.amp.autocast(
                 "cuda", enabled=bool(use_amp and device.type == "cuda")
             ):
-                loss_output = loss_fn.forward_model(
-                    model, batch, stage1_recon_only=current_in_stage1
-                )
+                loss_output = loss_fn.forward_model(model, batch, stage=current_stage)
                 total_loss = loss_output.total_loss
 
             # Telemetry accumulation from unscaled loss
@@ -474,8 +656,8 @@ def train_multibranch(
                 flush=True,
             )
 
-        # Stage 1 Sanity Gating at warmup boundary
-        if current_in_stage1 and epoch_num == warmup_vae_epochs:
+        # Stage 1 Sanity Gating and Milestone Checkpoint
+        if stage1_epochs > 0 and epoch == stage1_epochs - 1:
             model.eval()
             print("\nEvaluating Stage 1 Autoencoder Sanity Gate...")
             sample_stds: List[float] = []
@@ -504,14 +686,49 @@ def train_multibranch(
                     f"std ({avg_recon_std:.2f}) is below threshold "
                     f"({sanity_check_min_std:.2f}). Flat gray outputs detected!"
                 )
-            print("Sanity Check Passed! Autoencoder representations are diverse.\n")
+            print("Sanity Check Passed! Autoencoder representations are diverse.")
+
+            stage1_ckpt_path = output_dir / "stage1_vae.pt"
+            model.export_vae_checkpoint(stage1_ckpt_path)
+            print(f"Saved Stage 1 milestone checkpoint: {stage1_ckpt_path.name}\n")
+            model.train()
+
+        # Stage 2 Milestone Checkpoint
+        if stage2_epochs > 0 and epoch == (stage1_epochs + stage2_epochs - 1):
+            print("\nSaving Stage 2 Latent Transformers Checkpoint Milestone...")
+            stage2_ckpt_path = output_dir / "stage2_transformers.pt"
+            torch.save(
+                {
+                    "forward_transformer": model.forward_transformer.state_dict(),
+                    "rotation_transformer": model.rotation_transformer.state_dict(),
+                },
+                stage2_ckpt_path,
+            )
+            model.export_forward_checkpoint(output_dir / "forward_transformer.pt")
+            model.export_rotation_checkpoint(output_dir / "rotation_transformer.pt")
+            print(
+                f"Saved Stage 2 milestone checkpoints: {stage2_ckpt_path.name}, "
+                "forward_transformer.pt, rotation_transformer.pt\n"
+            )
+
+        # Stage 3 Milestone Checkpoint
+        if epoch == max_epochs - 1:
+            print("\nSaving Final Stage 3 Checkpoints and Loss Telemetry...")
+            save_all_checkpoints(model, output_dir)
+            plot_loss_curves(history, output_dir)
 
         # Periodic checkpoint saving
-        if save_interval > 0 and (epoch + 1) % save_interval == 0:
+        if (
+            save_interval > 0
+            and (epoch + 1) % save_interval == 0
+            and epoch != max_epochs - 1
+        ):
             save_all_checkpoints(model, output_dir)
+            plot_loss_curves(history, output_dir)
 
-    # Final checkpoint saving
+    # Final checkpoint saving and telemetry plotting
     save_all_checkpoints(model, output_dir)
+    plot_loss_curves(history, output_dir)
 
     return model, history
 
