@@ -11,6 +11,7 @@ from typing import Dict
 
 import pytest
 import torch
+
 from agilab_lib.models import (
     VAE,
     ForwardLatentTransformer,
@@ -440,13 +441,13 @@ def test_gradient_flow_through_all_branches() -> None:
     # Forward transformer gradients
     for name, p in model.forward_transformer.named_parameters():
         assert p.grad is not None, f"Forward parameter {name} has no gradient."
-        assert not torch.isnan(
-            p.grad
-        ).any(), f"Forward parameter {name} has NaN gradient."
+        assert not torch.isnan(p.grad).any(), (
+            f"Forward parameter {name} has NaN gradient."
+        )
 
     # Rotation transformer gradients
     for name, p in model.rotation_transformer.named_parameters():
         assert p.grad is not None, f"Rotation parameter {name} has no gradient."
-        assert not torch.isnan(
-            p.grad
-        ).any(), f"Rotation parameter {name} has NaN gradient."
+        assert not torch.isnan(p.grad).any(), (
+            f"Rotation parameter {name} has NaN gradient."
+        )

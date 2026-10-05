@@ -11,13 +11,14 @@ import os
 
 import hydra
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
 )
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.keyframes import extract_keyframe_indices
-from omegaconf import DictConfig, OmegaConf
 
 
 @hydra.main(

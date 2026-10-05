@@ -12,13 +12,14 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from torch.utils.data import DataLoader
+
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceBatch,
     DualSourceVideoDataset,
     DummyDualSourceVideoDataset,
     dual_source_collate_fn,
 )
-from torch.utils.data import DataLoader
 
 
 def _create_synthetic_video(
@@ -454,12 +455,12 @@ def test_straight_path_buffer_pruning_bounds(tmp_path: Path) -> None:
 
     for _, t, j, dist in dataset.fwd_pairs:
         # Strict boundary assertion: base and target in [expected_start, expected_end)
-        assert (
-            expected_start <= t < expected_end
-        ), f"Base frame {t} outside [{expected_start}, {expected_end})"
-        assert (
-            expected_start < j < expected_end
-        ), f"Target frame {j} outside [{expected_start}, {expected_end})"
+        assert expected_start <= t < expected_end, (
+            f"Base frame {t} outside [{expected_start}, {expected_end})"
+        )
+        assert expected_start < j < expected_end, (
+            f"Target frame {j} outside [{expected_start}, {expected_end})"
+        )
         assert t < j
 
         # Verify neither frame is in lower buffer [0, buffer_frames)

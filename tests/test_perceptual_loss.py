@@ -9,6 +9,7 @@ Description: Unit tests for frozen VGG-16 Perceptual Loss module.
 from PIL import Image  # isort: skip # noqa: F401
 import pytest
 import torch
+
 from agilab_lib.models.perceptual import VGGPerceptualLoss
 
 
