@@ -160,6 +160,9 @@ def test_angle_predictor_self_supervised_step() -> None:
     teacher_rlt = ResidualLatentTransformer(
         latent_dim=latent_dim, hidden_dim=32, num_blocks=2, block_inner_dim=32
     )
+    for blk in teacher_rlt.blocks:
+        torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
+        torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
     teacher_rlt.eval()
     for p in teacher_rlt.parameters():
         p.requires_grad = False

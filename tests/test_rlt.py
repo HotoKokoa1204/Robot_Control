@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from agilab_lib.datasets.latent_dataset import (
     AngleDataset,
@@ -32,6 +33,138 @@ def test_conditioned_residual_block_shape() -> None:
     cond = torch.randn(4, 3)
     out = block(x, cond)
     assert out.shape == (4, 128)
+
+
+def test_conditioned_residual_block_identity_zero_init() -> None:
+    """Verify exact identity mapping from zero-init ConditionedResidualBlock."""
+    block = ConditionedResidualBlock(dim=128, hidden_dim=64, cond_dim=3)
+    assert torch.all(block.fc3.weight == 0.0)
+    assert torch.all(block.fc3.bias == 0.0)
+
+    # Input tensor with both positive and negative values
+    x = torch.randn(4, 128)
+    cond = torch.randn(4, 3)
+    out = block(x, cond)
+
+    assert torch.equal(out, x)
+    assert torch.max(torch.abs(out - x)).item() == 0.0
+
+
+def test_rlt_zero_motion_exact_identity() -> None:
+    """Verify residual transformer yields exact numerical identity at zero motion."""
+    model = ResidualLatentTransformer(
+        latent_dim=128,
+        hidden_dim=64,
+        num_blocks=3,
+        block_inner_dim=64,
+    )
+    z = torch.randn(8, 128)
+
+    # 1. Scalar zero motion
+    out_scalar = model(z, angle_deg=0.0, distance_meters=0.0)
+    assert torch.equal(out_scalar, z)
+    assert torch.max(torch.abs(out_scalar - z)).item() == 0.0
+
+    # 2. Tensor zero motion
+    angle_tensor = torch.zeros(8, 1)
+    dist_tensor = torch.zeros(8, 1)
+    out_tensor = model(z, angle_deg=angle_tensor, distance_meters=dist_tensor)
+    assert torch.equal(out_tensor, z)
+    assert torch.max(torch.abs(out_tensor - z)).item() == 0.0
+
+    # 3. Direct unit vector sin_cos = [0, 1] with distance = 0
+    sc = torch.tensor([[0.0, 1.0]]).expand(8, 2)
+    out_sc = model(z, sin_cos=sc, distance_meters=dist_tensor)
+    assert torch.equal(out_sc, z)
+    assert torch.max(torch.abs(out_sc - z)).item() == 0.0
+
+
+def test_rlt_negative_coordinate_preservation() -> None:
+    """Verify negative latent coordinates are preserved without ReLU truncation."""
+    model = ResidualLatentTransformer(
+        latent_dim=128,
+        hidden_dim=64,
+        num_blocks=3,
+        block_inner_dim=64,
+    )
+    # Strictly negative latent tensor
+    z_neg = -torch.abs(torch.randn(4, 128)) - 0.5
+    assert torch.all(z_neg < 0.0)
+
+    out = model(z_neg, angle_deg=0.0, distance_meters=0.0)
+    assert torch.all(out < 0.0)
+    assert torch.equal(out, z_neg)
+    assert torch.max(torch.abs(out - z_neg)).item() == 0.0
+
+
+def test_rlt_direct_stream_architecture_and_reset_parameters() -> None:
+    """Verify direct-stream architecture and reset_parameters zeroing contract."""
+    latent_dim = 128
+    model = ResidualLatentTransformer(
+        latent_dim=latent_dim,
+        hidden_dim=64,
+        num_blocks=3,
+        block_inner_dim=64,
+    )
+    # fc_in and fc_out must be Identity modules
+    assert isinstance(model.fc_in, nn.Identity)
+    assert isinstance(model.fc_out, nn.Identity)
+
+    # All blocks must have dim == latent_dim
+    for blk in model.blocks:
+        assert isinstance(blk, ConditionedResidualBlock)
+        assert blk.fc1.in_features == latent_dim + 3
+        assert blk.fc3.out_features == latent_dim
+        assert torch.all(blk.fc3.weight == 0.0)
+        assert torch.all(blk.fc3.bias == 0.0)
+
+    # Perturb weights and verify reset_parameters re-zeroes them
+    for blk in model.blocks:
+        blk.fc3.weight.data.fill_(1.0)
+        blk.fc3.bias.data.fill_(1.0)
+    model.reset_parameters()
+    for blk in model.blocks:
+        assert torch.all(blk.fc3.weight == 0.0)
+        assert torch.all(blk.fc3.bias == 0.0)
+
+
+def test_rlt_gradient_flow_non_zero_motion() -> None:
+    """Verify gradients propagate cleanly through all blocks under non-zero motion."""
+    model = ResidualLatentTransformer(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=3,
+        block_inner_dim=32,
+    )
+    # Initialize non-zero weights in blocks to verify end-to-end backprop
+    for blk in model.blocks:
+        nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
+        nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
+
+    z = torch.randn(2, 64, requires_grad=True)
+    angle = torch.tensor([[30.0], [-45.0]])
+    distance = torch.tensor([[1.0], [0.5]])
+
+    out = model(z, angle_deg=angle, distance_meters=distance)
+    loss = (out**2).sum()
+    loss.backward()
+
+    assert z.grad is not None
+    assert torch.any(z.grad != 0.0)
+
+    for i, blk in enumerate(model.blocks):
+        assert blk.fc1.weight.grad is not None, f"Block {i} fc1 weight grad is None"
+        assert torch.any(blk.fc1.weight.grad != 0.0), (
+            f"Block {i} fc1 weight grad is zero"
+        )
+        assert blk.fc2.weight.grad is not None, f"Block {i} fc2 weight grad is None"
+        assert torch.any(blk.fc2.weight.grad != 0.0), (
+            f"Block {i} fc2 weight grad is zero"
+        )
+        assert blk.fc3.weight.grad is not None, f"Block {i} fc3 weight grad is None"
+        assert torch.any(blk.fc3.weight.grad != 0.0), (
+            f"Block {i} fc3 weight grad is zero"
+        )
 
 
 def test_rlt_pure_rotation_shape() -> None:

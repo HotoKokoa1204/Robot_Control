@@ -171,6 +171,7 @@ class JointNavigationLoss(nn.Module):
         w_fwd: Weight for forward translation dynamics branch (default 1.0).
         w_rot: Weight for rotation dynamics branch (default 1.0).
         w_recon: Weight for reconstruction branch (default 1.0).
+        w_latent: Weight for latent-space MSE alignment loss (default 1.0).
         perceptual_loss: VGGPerceptualLoss instance with frozen weights.
     """
 
@@ -181,6 +182,7 @@ class JointNavigationLoss(nn.Module):
         w_fwd: float = 1.0,
         w_rot: float = 1.0,
         w_recon: float = 1.0,
+        w_latent: float = 1.0,
         perceptual_loss: Optional[VGGPerceptualLoss] = None,
         pretrained_vgg: bool = True,
         perceptual_loss_type: str = "l1",
@@ -194,6 +196,7 @@ class JointNavigationLoss(nn.Module):
             w_fwd: Forward dynamics branch loss weight. Defaults to 1.0.
             w_rot: Rotation dynamics branch loss weight. Defaults to 1.0.
             w_recon: Reconstruction branch loss weight. Defaults to 1.0.
+            w_latent: Latent-space MSE alignment loss weight. Defaults to 1.0.
             perceptual_loss: Optional pre-instantiated VGGPerceptualLoss module.
             pretrained_vgg: Whether to load pretrained ImageNet weights if
                 perceptual_loss is None.
@@ -206,6 +209,7 @@ class JointNavigationLoss(nn.Module):
         self.w_fwd: float = float(w_fwd)
         self.w_rot: float = float(w_rot)
         self.w_recon: float = float(w_recon)
+        self.w_latent: float = float(w_latent)
 
         if perceptual_loss is not None:
             self.perceptual_loss: VGGPerceptualLoss = perceptual_loss
@@ -226,12 +230,15 @@ class JointNavigationLoss(nn.Module):
         Returns:
             Scalar KL divergence loss tensor.
         """
-        return -0.5 * torch.mean(1.0 + logvar - mu.pow(2) - logvar.exp())
+        return -0.5 * torch.mean(
+            torch.sum(1.0 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+        )
 
     def forward_model(
         self,
         model: nn.Module,
         batch: Union[Dict[str, Any], Any],
+        stage1_recon_only: bool = False,
     ) -> JointLossOutput:
         """Compute joint loss by executing multi-branch forward passes through model.
 
@@ -240,6 +247,8 @@ class JointNavigationLoss(nn.Module):
             batch: Paired batch (DualSourceBatch or dictionary) containing
                 'recon_frame', 'fwd_current', 'fwd_target', 'fwd_distance',
                 'rot_current', 'rot_target', and 'rot_sin_cos'.
+            stage1_recon_only: When True, executes only the Autoencoder reconstruction
+                branch and bypasses forward/rotation transformer branches.
 
         Returns:
             JointLossOutput containing total loss and detailed metrics dictionary.
@@ -250,6 +259,17 @@ class JointNavigationLoss(nn.Module):
         recon_frame = _extract_tensor(batch, "recon_frame", "x_t")
         if recon_frame is None:
             raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
+
+        # Branch 1: Reconstruction
+        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
+
+        if stage1_recon_only:
+            return self.forward(
+                recon_x=recon_x,
+                x_t=recon_frame,
+                mu_t=mu_t,
+                logvar_t=logvar_t,
+            )
 
         fwd_current = _extract_tensor(batch, "fwd_current")
         fwd_target = _extract_tensor(batch, "fwd_target")
@@ -272,27 +292,34 @@ class JointNavigationLoss(nn.Module):
             else getattr(batch, "rot_angle_deg", None)
         )
 
-        # Branch 1: Reconstruction
-        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
-
         # Branch 2: Forward translation dynamics
         pred_fwd = None
+        pred_fwd_latent = None
         if fwd_current is not None and fwd_distance is not None:
-            pred_fwd, _, _ = model.forward_translation(
+            pred_fwd, pred_fwd_latent, _ = model.forward_translation(
                 x_t=fwd_current,
                 distance_meters=fwd_distance,
             )
 
         # Branch 3: Rotation dynamics
         pred_rot = None
+        pred_rot_latent = None
         if rot_current is not None and (
             rot_sin_cos is not None or rot_angle_deg is not None
         ):
-            pred_rot, _, _ = model.forward_rotation(
+            pred_rot, pred_rot_latent, _ = model.forward_rotation(
                 x_t=rot_current,
                 sin_cos=rot_sin_cos,
                 angle_deg=rot_angle_deg,
             )
+
+        mu_fwd_target = None
+        if fwd_target is not None:
+            mu_fwd_target = model.vae.encode(fwd_target)[0].detach()
+
+        mu_rot_target = None
+        if rot_target is not None:
+            mu_rot_target = model.vae.encode(rot_target)[0].detach()
 
         return self.forward(
             recon_x=recon_x,
@@ -303,6 +330,10 @@ class JointNavigationLoss(nn.Module):
             target_fwd=fwd_target,
             pred_rot=pred_rot,
             target_rot=rot_target,
+            pred_fwd_latent=pred_fwd_latent,
+            mu_fwd_target=mu_fwd_target,
+            pred_rot_latent=pred_rot_latent,
+            mu_rot_target=mu_rot_target,
         )
 
     def forward(
@@ -315,6 +346,10 @@ class JointNavigationLoss(nn.Module):
         target_fwd: Optional[torch.Tensor] = None,
         pred_rot: Optional[torch.Tensor] = None,
         target_rot: Optional[torch.Tensor] = None,
+        pred_fwd_latent: Optional[torch.Tensor] = None,
+        mu_fwd_target: Optional[torch.Tensor] = None,
+        pred_rot_latent: Optional[torch.Tensor] = None,
+        mu_rot_target: Optional[torch.Tensor] = None,
         *,
         recon_x: Optional[torch.Tensor] = None,
         x_t: Optional[torch.Tensor] = None,
@@ -323,6 +358,10 @@ class JointNavigationLoss(nn.Module):
         logvar: Optional[torch.Tensor] = None,
         fwd_target: Optional[torch.Tensor] = None,
         rot_target: Optional[torch.Tensor] = None,
+        fwd_latent_pred: Optional[torch.Tensor] = None,
+        target_fwd_latent: Optional[torch.Tensor] = None,
+        rot_latent_pred: Optional[torch.Tensor] = None,
+        target_rot_latent: Optional[torch.Tensor] = None,
         model: Optional[Any] = None,
         batch: Optional[Any] = None,
     ) -> JointLossOutput:
@@ -342,6 +381,10 @@ class JointNavigationLoss(nn.Module):
             target_fwd: Ground-truth forward target frame (B, 3, H, W).
             pred_rot: Predicted rotation frame (B, 3, H, W).
             target_rot: Ground-truth rotation target frame (B, 3, H, W).
+            pred_fwd_latent: Predicted forward latent vector (B, latent_dim).
+            mu_fwd_target: Ground-truth forward target latent vector (B, latent_dim).
+            pred_rot_latent: Predicted rotation latent vector (B, latent_dim).
+            mu_rot_target: Ground-truth rotation target latent vector (B, latent_dim).
             recon_x: Keyword argument for reconstructed frame (B, 3, H, W).
             x_t: Keyword argument for reconstruction target frame (B, 3, H, W).
             target_recon: Alias for x_t.
@@ -349,6 +392,10 @@ class JointNavigationLoss(nn.Module):
             logvar: Alias for logvar_t.
             fwd_target: Alias for target_fwd.
             rot_target: Alias for target_rot.
+            fwd_latent_pred: Alias for pred_fwd_latent.
+            target_fwd_latent: Alias for mu_fwd_target.
+            rot_latent_pred: Alias for pred_rot_latent.
+            target_rot_latent: Alias for mu_rot_target.
             model: Optional JointNavigationModel instance for integrated forward
                 execution.
             batch: Optional batch instance when model is supplied.
@@ -411,6 +458,22 @@ class JointNavigationLoss(nn.Module):
                     "pred_rotation",
                     "rotation_pred",
                 )
+            if pred_fwd_latent is None:
+                pred_fwd_latent = _extract_tensor(
+                    predictions,
+                    "pred_fwd_latent",
+                    "fwd_pred_latent",
+                    "fwd_latent_pred",
+                    "fwd_latent",
+                )
+            if pred_rot_latent is None:
+                pred_rot_latent = _extract_tensor(
+                    predictions,
+                    "pred_rot_latent",
+                    "rot_pred_latent",
+                    "rot_latent_pred",
+                    "rot_latent",
+                )
 
             # If predictions also includes targets (single container call)
             if targets is None:
@@ -437,6 +500,22 @@ class JointNavigationLoss(nn.Module):
                         "target_rot",
                         "rot_future",
                         "target_rotation",
+                    )
+                if mu_fwd_target is None:
+                    mu_fwd_target = _extract_tensor(
+                        predictions,
+                        "mu_fwd_target",
+                        "fwd_target_latent",
+                        "target_fwd_latent",
+                        "mu_fwd",
+                    )
+                if mu_rot_target is None:
+                    mu_rot_target = _extract_tensor(
+                        predictions,
+                        "mu_rot_target",
+                        "rot_target_latent",
+                        "target_rot_latent",
+                        "mu_rot",
                     )
 
         # Extract from targets container if provided
@@ -465,6 +544,22 @@ class JointNavigationLoss(nn.Module):
                     "rot_future",
                     "target_rotation",
                 )
+            if mu_fwd_target is None:
+                mu_fwd_target = _extract_tensor(
+                    targets,
+                    "mu_fwd_target",
+                    "fwd_target_latent",
+                    "target_fwd_latent",
+                    "mu_fwd",
+                )
+            if mu_rot_target is None:
+                mu_rot_target = _extract_tensor(
+                    targets,
+                    "mu_rot_target",
+                    "rot_target_latent",
+                    "target_rot_latent",
+                    "mu_rot",
+                )
 
         # Apply keyword aliases
         if x_t is None and target_recon is not None:
@@ -477,11 +572,23 @@ class JointNavigationLoss(nn.Module):
             target_fwd = fwd_target
         if target_rot is None and rot_target is not None:
             target_rot = rot_target
+        if pred_fwd_latent is None and fwd_latent_pred is not None:
+            pred_fwd_latent = fwd_latent_pred
+        if mu_fwd_target is None and target_fwd_latent is not None:
+            mu_fwd_target = target_fwd_latent
+        if pred_rot_latent is None and rot_latent_pred is not None:
+            pred_rot_latent = rot_latent_pred
+        if mu_rot_target is None and target_rot_latent is not None:
+            mu_rot_target = target_rot_latent
 
         # Validate provided branch tensor pairs and shapes
         has_recon = recon_x is not None and x_t is not None
-        has_fwd = pred_fwd is not None and target_fwd is not None
-        has_rot = pred_rot is not None and target_rot is not None
+        has_fwd = (pred_fwd is not None and target_fwd is not None) or (
+            pred_fwd_latent is not None and mu_fwd_target is not None
+        )
+        has_rot = (pred_rot is not None and target_rot is not None) or (
+            pred_rot_latent is not None and mu_rot_target is not None
+        )
 
         if not (has_recon or has_fwd or has_rot):
             raise ValueError(
@@ -497,20 +604,32 @@ class JointNavigationLoss(nn.Module):
                     f"!= x_t {x_t.shape}."
                 )
 
-        if has_fwd:
-            assert pred_fwd is not None and target_fwd is not None
+        if pred_fwd is not None and target_fwd is not None:
             if pred_fwd.shape != target_fwd.shape:
                 raise ValueError(
                     f"Forward dynamics shape mismatch: pred_fwd {pred_fwd.shape} "
                     f"!= target_fwd {target_fwd.shape}."
                 )
 
-        if has_rot:
-            assert pred_rot is not None and target_rot is not None
+        if pred_rot is not None and target_rot is not None:
             if pred_rot.shape != target_rot.shape:
                 raise ValueError(
                     f"Rotation dynamics shape mismatch: pred_rot {pred_rot.shape} "
                     f"!= target_rot {target_rot.shape}."
+                )
+
+        if pred_fwd_latent is not None and mu_fwd_target is not None:
+            if pred_fwd_latent.shape != mu_fwd_target.shape:
+                raise ValueError(
+                    f"Forward latent shape mismatch: pred_fwd_latent "
+                    f"{pred_fwd_latent.shape} != mu_fwd_target {mu_fwd_target.shape}."
+                )
+
+        if pred_rot_latent is not None and mu_rot_target is not None:
+            if pred_rot_latent.shape != mu_rot_target.shape:
+                raise ValueError(
+                    f"Rotation latent shape mismatch: pred_rot_latent "
+                    f"{pred_rot_latent.shape} != mu_rot_target {mu_rot_target.shape}."
                 )
 
         if mu_t is not None and logvar_t is not None:
@@ -524,7 +643,19 @@ class JointNavigationLoss(nn.Module):
         ref_tensor = (
             recon_x
             if recon_x is not None
-            else (pred_fwd if pred_fwd is not None else pred_rot)
+            else (
+                pred_fwd
+                if pred_fwd is not None
+                else (
+                    pred_rot
+                    if pred_rot is not None
+                    else (
+                        pred_fwd_latent
+                        if pred_fwd_latent is not None
+                        else pred_rot_latent
+                    )
+                )
+            )
         )
         assert ref_tensor is not None
         device = ref_tensor.device
@@ -555,32 +686,58 @@ class JointNavigationLoss(nn.Module):
 
         # Branch 2: Forward translation dynamics loss
         if has_fwd:
-            assert pred_fwd is not None and target_fwd is not None
-            fwd_mse = F.mse_loss(pred_fwd, target_fwd, reduction="mean")
-            if self.alpha_perc > 0.0:
-                fwd_perc = self.perceptual_loss(pred_fwd, target_fwd)
+            if pred_fwd is not None and target_fwd is not None:
+                fwd_mse = F.mse_loss(pred_fwd, target_fwd, reduction="mean")
+                if self.alpha_perc > 0.0:
+                    fwd_perc = self.perceptual_loss(pred_fwd, target_fwd)
+                else:
+                    fwd_perc = torch.zeros((), device=device, dtype=dtype)
             else:
+                fwd_mse = torch.zeros((), device=device, dtype=dtype)
                 fwd_perc = torch.zeros((), device=device, dtype=dtype)
 
-            loss_fwd = fwd_mse + self.alpha_perc * fwd_perc
+            if pred_fwd_latent is not None and mu_fwd_target is not None:
+                fwd_latent_mse = F.mse_loss(
+                    pred_fwd_latent, mu_fwd_target, reduction="mean"
+                )
+            else:
+                fwd_latent_mse = torch.zeros((), device=device, dtype=dtype)
+
+            loss_fwd = (
+                fwd_mse + self.alpha_perc * fwd_perc + self.w_latent * fwd_latent_mse
+            )
         else:
             fwd_mse = torch.zeros((), device=device, dtype=dtype)
             fwd_perc = torch.zeros((), device=device, dtype=dtype)
+            fwd_latent_mse = torch.zeros((), device=device, dtype=dtype)
             loss_fwd = torch.zeros((), device=device, dtype=dtype)
 
         # Branch 3: Rotation dynamics loss
         if has_rot:
-            assert pred_rot is not None and target_rot is not None
-            rot_mse = F.mse_loss(pred_rot, target_rot, reduction="mean")
-            if self.alpha_perc > 0.0:
-                rot_perc = self.perceptual_loss(pred_rot, target_rot)
+            if pred_rot is not None and target_rot is not None:
+                rot_mse = F.mse_loss(pred_rot, target_rot, reduction="mean")
+                if self.alpha_perc > 0.0:
+                    rot_perc = self.perceptual_loss(pred_rot, target_rot)
+                else:
+                    rot_perc = torch.zeros((), device=device, dtype=dtype)
             else:
+                rot_mse = torch.zeros((), device=device, dtype=dtype)
                 rot_perc = torch.zeros((), device=device, dtype=dtype)
 
-            loss_rot = rot_mse + self.alpha_perc * rot_perc
+            if pred_rot_latent is not None and mu_rot_target is not None:
+                rot_latent_mse = F.mse_loss(
+                    pred_rot_latent, mu_rot_target, reduction="mean"
+                )
+            else:
+                rot_latent_mse = torch.zeros((), device=device, dtype=dtype)
+
+            loss_rot = (
+                rot_mse + self.alpha_perc * rot_perc + self.w_latent * rot_latent_mse
+            )
         else:
             rot_mse = torch.zeros((), device=device, dtype=dtype)
             rot_perc = torch.zeros((), device=device, dtype=dtype)
+            rot_latent_mse = torch.zeros((), device=device, dtype=dtype)
             loss_rot = torch.zeros((), device=device, dtype=dtype)
 
         # Total multi-branch objective
@@ -602,9 +759,11 @@ class JointNavigationLoss(nn.Module):
             "loss_fwd": loss_fwd,
             "fwd_mse": fwd_mse,
             "fwd_perc": fwd_perc,
+            "fwd_latent_mse": fwd_latent_mse,
             "loss_rot": loss_rot,
             "rot_mse": rot_mse,
             "rot_perc": rot_perc,
+            "rot_latent_mse": rot_latent_mse,
         }
 
         return JointLossOutput(total_loss=total_loss, metrics=metrics)
