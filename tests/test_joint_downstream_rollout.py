@@ -5,8 +5,9 @@ Author: KafuuChino
 Date: 2026-09-29
 Description: Comprehensive integration and regression tests verifying downstream
     pipeline compatibility for checkpoints exported from JointNavigationModel
-    (512-dim latent space, 5-block forward and rotation transformers). Tests
-    ChainedLatentTransformer rollouts (ROTATE_FIRST, FORWARD_FIRST), single-action
+    and three-stage curricular training (512-dim latent space, 5-block forward
+    and rotation transformers). Tests ChainedLatentTransformer rollouts
+    (ROTATE_FIRST, FORWARD_FIRST), three-stage checkpoint loading, single-action
     invariance, VAE frame decoding, progressive keyframing, nested checkpoint loading,
     and end-to-end generate_video.py execution.
 """
@@ -19,15 +20,17 @@ from typing import Dict
 from PIL import Image  # isort: skip # noqa: F401
 
 import torch
-from omegaconf import OmegaConf
-
+from agilab_lib.datasets.dual_source_dataset import DummyDualSourceVideoDataset
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.rlt import (
     ChainedLatentTransformer,
     ExecutionOrder,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import OmegaConf
+
 from scripts.generate_video import generate_video
+from scripts.train_multibranch import train_multibranch
 
 
 def export_test_checkpoints(
@@ -593,3 +596,494 @@ def test_multistep_compound_rollout_preserves_latent_norm_and_luminance(
         # Decoded frames must be identical - zero illumination decay or collapse
         assert abs(final_mean_luminance - initial_mean_luminance) < 1e-5
         assert torch.allclose(final_frame, initial_frame, atol=1e-5)
+
+
+def export_three_stage_checkpoints(
+    model: JointNavigationModel, out_dir: Path
+) -> Dict[str, Path]:
+    """Helper to export checkpoints mimicking the three-stage training milestones.
+
+    Exports:
+    - Stage 1: stage1_vae.pt
+    - Stage 2: stage2_transformers.pt, forward_transformer.pt, rotation_transformer.pt
+    - Stage 3: joint_navigation_model.pt, final_joint_model.pt, vae_512.pt
+
+    Args:
+        model: JointNavigationModel instance.
+        out_dir: Target directory to save checkpoints.
+
+    Returns:
+        Dictionary mapping checkpoint names to file paths.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "stage1_vae": out_dir / "stage1_vae.pt",
+        "stage2_transformers": out_dir / "stage2_transformers.pt",
+        "forward": out_dir / "forward_transformer.pt",
+        "rotation": out_dir / "rotation_transformer.pt",
+        "joint_navigation_model": out_dir / "joint_navigation_model.pt",
+        "final_joint_model": out_dir / "final_joint_model.pt",
+        "vae_512": out_dir / "vae_512.pt",
+    }
+    # Stage 1 milestone
+    model.export_vae_checkpoint(paths["stage1_vae"])
+
+    # Stage 2 milestone
+    torch.save(
+        {
+            "forward_transformer": model.forward_transformer.state_dict(),
+            "rotation_transformer": model.rotation_transformer.state_dict(),
+        },
+        paths["stage2_transformers"],
+    )
+    model.export_forward_checkpoint(paths["forward"])
+    model.export_rotation_checkpoint(paths["rotation"])
+
+    # Stage 3 milestones
+    torch.save(model.state_dict(), paths["joint_navigation_model"])
+    torch.save(model.state_dict(), paths["final_joint_model"])
+    model.export_vae_checkpoint(paths["vae_512"])
+
+    return paths
+
+
+def test_three_stage_checkpoints_loading(tmp_path: Path) -> None:
+    """Verify Stage 1, Stage 2, and Stage 3 checkpoints load into downstream models.
+
+    Validates that:
+    - stage1_vae.pt loads cleanly into standalone VAE and JointNavigationModel.
+    - stage2_transformers.pt (and standalone forward/rotation checkpoints) load cleanly
+      into ChainedLatentTransformer and JointNavigationModel.
+    - joint_navigation_model.pt loads cleanly into JointNavigationModel and
+      ChainedLatentTransformer.
+
+    Args:
+        tmp_path: Temporary directory fixture provided by pytest.
+    """
+    joint_model = JointNavigationModel(
+        latent_dim=512,
+        hidden_dim=512,
+        num_blocks=5,
+        block_inner_dim=512,
+    )
+    ckpts = export_three_stage_checkpoints(joint_model, tmp_path / "three_stage_ckpts")
+
+    # 1. Verify stage1_vae.pt loading
+    standalone_vae = VAE(latent_dim=512)
+    stage1_sd = torch.load(ckpts["stage1_vae"], map_location="cpu", weights_only=True)
+    standalone_vae.load_state_dict(stage1_sd)
+    for k, v in standalone_vae.state_dict().items():
+        assert torch.equal(v, joint_model.vae.state_dict()[k])
+
+    downstream_joint = JointNavigationModel(
+        latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
+    )
+    downstream_joint.load_vae_pretrained(ckpts["stage1_vae"])
+    for k, v in downstream_joint.vae.state_dict().items():
+        assert torch.equal(v, joint_model.vae.state_dict()[k])
+
+    # 2. Verify stage2_transformers.pt loading into ChainedLatentTransformer
+    chained_from_stage2 = ChainedLatentTransformer(
+        latent_dim=512,
+        hidden_dim=512,
+        forward_num_blocks=5,
+        rotation_num_blocks=5,
+        block_inner_dim=512,
+        rotation_checkpoint=ckpts["stage2_transformers"],
+        forward_checkpoint=ckpts["stage2_transformers"],
+    )
+    for k, v in chained_from_stage2.forward_model.state_dict().items():
+        assert torch.equal(v, joint_model.forward_transformer.state_dict()[k])
+    for k, v in chained_from_stage2.rotation_model.state_dict().items():
+        assert torch.equal(v, joint_model.rotation_transformer.state_dict()[k])
+
+    # Verify stage2_transformers.pt loading into JointNavigationModel
+    downstream_joint.load_forward_pretrained(ckpts["stage2_transformers"])
+    downstream_joint.load_rotation_pretrained(ckpts["stage2_transformers"])
+    for k, v in downstream_joint.forward_transformer.state_dict().items():
+        assert torch.equal(v, joint_model.forward_transformer.state_dict()[k])
+    for k, v in downstream_joint.rotation_transformer.state_dict().items():
+        assert torch.equal(v, joint_model.rotation_transformer.state_dict()[k])
+
+    # 3. Verify standalone forward_transformer.pt and rotation_transformer.pt loading
+    chained_from_standalone = ChainedLatentTransformer(
+        latent_dim=512,
+        hidden_dim=512,
+        forward_num_blocks=5,
+        rotation_num_blocks=5,
+        block_inner_dim=512,
+        rotation_checkpoint=ckpts["rotation"],
+        forward_checkpoint=ckpts["forward"],
+    )
+    for k, v in chained_from_standalone.forward_model.state_dict().items():
+        assert torch.equal(v, joint_model.forward_transformer.state_dict()[k])
+    for k, v in chained_from_standalone.rotation_model.state_dict().items():
+        assert torch.equal(v, joint_model.rotation_transformer.state_dict()[k])
+
+    # 4. Verify Stage 3 composite joint_navigation_model.pt loading
+    joint_model_reloaded = JointNavigationModel(
+        latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
+    )
+    joint_model_reloaded.load_state_dict(
+        torch.load(
+            ckpts["joint_navigation_model"], map_location="cpu", weights_only=True
+        )
+    )
+    for k, v in joint_model_reloaded.state_dict().items():
+        assert torch.equal(v, joint_model.state_dict()[k])
+
+    chained_from_composite = ChainedLatentTransformer(
+        latent_dim=512,
+        hidden_dim=512,
+        forward_num_blocks=5,
+        rotation_num_blocks=5,
+        block_inner_dim=512,
+        rotation_checkpoint=ckpts["joint_navigation_model"],
+        forward_checkpoint=ckpts["joint_navigation_model"],
+    )
+    for k, v in chained_from_composite.forward_model.state_dict().items():
+        assert torch.equal(v, joint_model.forward_transformer.state_dict()[k])
+    for k, v in chained_from_composite.rotation_model.state_dict().items():
+        assert torch.equal(v, joint_model.rotation_transformer.state_dict()[k])
+
+
+def test_three_stage_sequential_compound_rollouts(tmp_path: Path) -> None:
+    """Verify sequential compound rollouts on latents from three-stage checkpoints.
+
+    Tests Rotate-First and Forward-First compound rollouts without dimension errors,
+    numerical degeneration, or shape mismatch.
+
+    Args:
+        tmp_path: Temporary directory fixture provided by pytest.
+    """
+    joint_model = JointNavigationModel(
+        latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
+    )
+    ckpts = export_three_stage_checkpoints(joint_model, tmp_path / "rollout_ckpts")
+
+    vae = VAE(latent_dim=512)
+    vae.load_state_dict(
+        torch.load(ckpts["stage1_vae"], map_location="cpu", weights_only=True)
+    )
+    vae.eval()
+
+    chained = ChainedLatentTransformer(
+        latent_dim=512,
+        hidden_dim=512,
+        forward_num_blocks=5,
+        rotation_num_blocks=5,
+        block_inner_dim=512,
+        rotation_checkpoint=ckpts["stage2_transformers"],
+        forward_checkpoint=ckpts["stage2_transformers"],
+    )
+    chained.eval()
+
+    batch_size = 4
+    torch.manual_seed(101)
+    x = torch.rand(batch_size, 3, 108, 192)
+
+    with torch.no_grad():
+        z_init = vae.get_latent(x)
+        assert z_init.shape == (batch_size, 512)
+        assert torch.all(torch.isfinite(z_init))
+
+        # Rotate-First compound rollout
+        angle_rf = torch.tensor([25.0, -45.0, 60.0, -90.0])
+        dist_rf = torch.tensor([0.8, 1.5, 0.3, 2.0])
+        final_rf, mid_rf = chained(
+            z_init,
+            angle_deg=angle_rf,
+            distance_meters=dist_rf,
+            execution_order=ExecutionOrder.ROTATE_FIRST,
+            return_intermediate=True,
+        )
+
+        assert mid_rf.shape == (batch_size, 512)
+        assert final_rf.shape == (batch_size, 512)
+        assert torch.all(torch.isfinite(mid_rf))
+        assert torch.all(torch.isfinite(final_rf))
+
+        expected_mid_rf = chained.rotation_model(z_init, angle_deg=angle_rf)
+        expected_final_rf = chained.forward_model(mid_rf, distance_meters=dist_rf)
+        assert torch.allclose(mid_rf, expected_mid_rf, atol=1e-6)
+        assert torch.allclose(final_rf, expected_final_rf, atol=1e-6)
+
+        # Forward-First compound rollout
+        angle_ff = torch.tensor([-30.0, 45.0, -15.0, 75.0])
+        dist_ff = torch.tensor([1.0, 0.5, 2.2, 1.4])
+        final_ff, mid_ff = chained(
+            z_init,
+            angle_deg=angle_ff,
+            distance_meters=dist_ff,
+            execution_order=ExecutionOrder.FORWARD_FIRST,
+            return_intermediate=True,
+        )
+
+        assert mid_ff.shape == (batch_size, 512)
+        assert final_ff.shape == (batch_size, 512)
+        assert torch.all(torch.isfinite(mid_ff))
+        assert torch.all(torch.isfinite(final_ff))
+
+        expected_mid_ff = chained.forward_model(z_init, distance_meters=dist_ff)
+        expected_final_ff = chained.rotation_model(mid_ff, angle_deg=angle_ff)
+        assert torch.allclose(mid_ff, expected_mid_ff, atol=1e-6)
+        assert torch.allclose(final_ff, expected_final_ff, atol=1e-6)
+
+        # Verify equivalence with ChainedLatentTransformer loaded from
+        # joint_navigation_model.pt
+        chained_joint = ChainedLatentTransformer(
+            latent_dim=512,
+            hidden_dim=512,
+            forward_num_blocks=5,
+            rotation_num_blocks=5,
+            block_inner_dim=512,
+            rotation_checkpoint=ckpts["joint_navigation_model"],
+            forward_checkpoint=ckpts["joint_navigation_model"],
+        )
+        chained_joint.eval()
+
+        final_joint_rf, mid_joint_rf = chained_joint(
+            z_init,
+            angle_deg=angle_rf,
+            distance_meters=dist_rf,
+            execution_order=ExecutionOrder.ROTATE_FIRST,
+            return_intermediate=True,
+        )
+        assert torch.allclose(final_rf, final_joint_rf, atol=1e-6)
+        assert torch.allclose(mid_rf, mid_joint_rf, atol=1e-6)
+
+
+def test_three_stage_decoder_image_reconstruction(tmp_path: Path) -> None:
+    """Verify decoder decodes chained rollout latents to valid images in [0, 1].
+
+    Args:
+        tmp_path: Temporary directory fixture provided by pytest.
+    """
+    joint_model = JointNavigationModel(
+        latent_dim=512, hidden_dim=512, num_blocks=5, block_inner_dim=512
+    )
+    ckpts = export_three_stage_checkpoints(joint_model, tmp_path / "decode_ckpts")
+
+    vae = VAE(latent_dim=512)
+    vae.load_state_dict(
+        torch.load(ckpts["stage1_vae"], map_location="cpu", weights_only=True)
+    )
+    vae.eval()
+
+    chained = ChainedLatentTransformer(
+        latent_dim=512,
+        hidden_dim=512,
+        forward_num_blocks=5,
+        rotation_num_blocks=5,
+        block_inner_dim=512,
+        rotation_checkpoint=ckpts["stage2_transformers"],
+        forward_checkpoint=ckpts["stage2_transformers"],
+    )
+    chained.eval()
+
+    batch_size = 3
+    torch.manual_seed(202)
+    x = torch.rand(batch_size, 3, 108, 192)
+
+    with torch.no_grad():
+        z_init = vae.get_latent(x)
+
+        # 1. Rotate-First compound rollout and frame decoding
+        final_rf, mid_rf = chained(
+            z_init,
+            angle_deg=torch.tensor([30.0, -45.0, 60.0]),
+            distance_meters=torch.tensor([1.0, 0.5, 1.8]),
+            execution_order=ExecutionOrder.ROTATE_FIRST,
+            return_intermediate=True,
+        )
+
+        mid_recon_rf = vae.decode(mid_rf)
+        final_recon_rf = vae.decode(final_rf)
+
+        assert mid_recon_rf.shape == (batch_size, 3, 108, 192)
+        assert final_recon_rf.shape == (batch_size, 3, 108, 192)
+        assert torch.all(mid_recon_rf >= 0.0)
+        assert torch.all(mid_recon_rf <= 1.0)
+        assert torch.all(torch.isfinite(mid_recon_rf))
+        assert torch.all(final_recon_rf >= 0.0)
+        assert torch.all(final_recon_rf <= 1.0)
+        assert torch.all(torch.isfinite(final_recon_rf))
+
+        # 2. Forward-First compound rollout and frame decoding
+        final_ff, mid_ff = chained(
+            z_init,
+            angle_deg=torch.tensor([-15.0, 50.0, -90.0]),
+            distance_meters=torch.tensor([0.4, 2.1, 1.2]),
+            execution_order=ExecutionOrder.FORWARD_FIRST,
+            return_intermediate=True,
+        )
+
+        mid_recon_ff = vae.decode(mid_ff)
+        final_recon_ff = vae.decode(final_ff)
+
+        assert mid_recon_ff.shape == (batch_size, 3, 108, 192)
+        assert final_recon_ff.shape == (batch_size, 3, 108, 192)
+        assert torch.all(mid_recon_ff >= 0.0)
+        assert torch.all(mid_recon_ff <= 1.0)
+        assert torch.all(torch.isfinite(mid_recon_ff))
+        assert torch.all(final_recon_ff >= 0.0)
+        assert torch.all(final_recon_ff <= 1.0)
+        assert torch.all(torch.isfinite(final_recon_ff))
+
+        # 3. Progressive keyframing and frame decoding
+        keyframes = chained.generate_progressive_keyframes(
+            latent=z_init[0:1],
+            angle_deg=40.0,
+            distance_meters=1.0,
+            execution_order=ExecutionOrder.ROTATE_FIRST,
+            substep_angle_deg=20.0,
+            substep_distance_meters=0.5,
+        )
+        assert keyframes.shape == (5, 512)
+        decoded_keyframes = vae.decode(keyframes)
+        assert decoded_keyframes.shape == (5, 3, 108, 192)
+        assert torch.all(decoded_keyframes >= 0.0)
+        assert torch.all(decoded_keyframes <= 1.0)
+        assert torch.all(torch.isfinite(decoded_keyframes))
+
+
+def test_end_to_end_three_stage_training_downstream_rollout(
+    tmp_path: Path,
+) -> None:
+    """Verify downstream rollout and decoding from a real three-stage training run.
+
+    Executes train_multibranch with 1 epoch per stage, produces real milestone
+    checkpoints (stage1_vae.pt, stage2_transformers.pt, joint_navigation_model.pt),
+    and validates clean downstream loading, compound rollout, and frame decoding.
+
+    Args:
+        tmp_path: Temporary directory fixture provided by pytest.
+    """
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=4,
+        img_height=108,
+        img_width=192,
+        seed=123,
+    )
+    init_model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+    out_dir = tmp_path / "trained_ckpts"
+    cfg = OmegaConf.create(
+        {
+            "latent_dim": 64,
+            "hidden_dim": 32,
+            "num_blocks": 2,
+            "block_inner_dim": 32,
+            "lr": 1e-4,
+            "lr_vae_stage1": 1e-4,
+            "lr_vae_stage3": 1e-5,
+            "batch_size": 2,
+            "gradient_accumulation_steps": 1,
+            "use_amp": False,
+            "max_epochs": 3,
+            "stage1_epochs": 1,
+            "stage2_epochs": 1,
+            "stage3_epochs": 1,
+            "w_latent": 1.0,
+            "sanity_check_min_std": 0.1,
+            "alpha_perc": 0.5,
+            "beta_kl": 0.0001,
+            "w_fwd": 1.0,
+            "w_rot": 1.0,
+            "w_recon": 1.0,
+            "output_dir": str(out_dir),
+            "save_interval_epochs": 1,
+            "vae_checkpoint": None,
+            "device": "cpu",
+        }
+    )
+
+    _, history = train_multibranch(cfg, dataset=dataset, model=init_model)
+    assert len(history["loss"]) == 3
+
+    # Check that milestone checkpoints exist
+    stage1_ckpt = out_dir / "stage1_vae.pt"
+    stage2_ckpt = out_dir / "stage2_transformers.pt"
+    joint_ckpt = out_dir / "joint_navigation_model.pt"
+    assert stage1_ckpt.exists()
+    assert stage2_ckpt.exists()
+    assert joint_ckpt.exists()
+
+    # Load into downstream VAE
+    downstream_vae = VAE(latent_dim=64)
+    downstream_vae.load_state_dict(
+        torch.load(stage1_ckpt, map_location="cpu", weights_only=True)
+    )
+    downstream_vae.eval()
+
+    # Load into downstream ChainedLatentTransformer using stage2_transformers.pt
+    chained = ChainedLatentTransformer(
+        latent_dim=64,
+        hidden_dim=32,
+        forward_num_blocks=2,
+        rotation_num_blocks=2,
+        block_inner_dim=32,
+        rotation_checkpoint=stage2_ckpt,
+        forward_checkpoint=stage2_ckpt,
+    )
+    chained.eval()
+
+    # Load into downstream JointNavigationModel using joint_navigation_model.pt
+    downstream_joint = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+    downstream_joint.load_state_dict(
+        torch.load(joint_ckpt, map_location="cpu", weights_only=True)
+    )
+    downstream_joint.eval()
+
+    # Test sequential compound rollouts from encoded frame
+    test_frame = torch.rand(2, 3, 108, 192)
+    with torch.no_grad():
+        z_start = downstream_vae.get_latent(test_frame)
+        assert z_start.shape == (2, 64)
+
+        # Rotate-First rollout
+        final_rf, mid_rf = chained(
+            z_start,
+            angle_deg=torch.tensor([30.0, -45.0]),
+            distance_meters=torch.tensor([1.0, 0.5]),
+            execution_order=ExecutionOrder.ROTATE_FIRST,
+            return_intermediate=True,
+        )
+        assert final_rf.shape == (2, 64)
+        assert mid_rf.shape == (2, 64)
+        assert torch.all(torch.isfinite(final_rf))
+
+        # Decode using downstream VAE
+        decoded_rf = downstream_vae.decode(final_rf)
+        assert decoded_rf.shape == (2, 3, 108, 192)
+        assert torch.all(decoded_rf >= 0.0)
+        assert torch.all(decoded_rf <= 1.0)
+        assert torch.all(torch.isfinite(decoded_rf))
+
+        # Forward-First rollout
+        final_ff, mid_ff = chained(
+            z_start,
+            angle_deg=torch.tensor([-60.0, 20.0]),
+            distance_meters=torch.tensor([1.5, 0.8]),
+            execution_order=ExecutionOrder.FORWARD_FIRST,
+            return_intermediate=True,
+        )
+        assert final_ff.shape == (2, 64)
+        assert mid_ff.shape == (2, 64)
+        assert torch.all(torch.isfinite(final_ff))
+
+        # Decode using downstream JointNavigationModel decoder
+        decoded_ff = downstream_joint.decode(final_ff)
+        assert decoded_ff.shape == (2, 3, 108, 192)
+        assert torch.all(decoded_ff >= 0.0)
+        assert torch.all(decoded_ff <= 1.0)
+        assert torch.all(torch.isfinite(decoded_ff))

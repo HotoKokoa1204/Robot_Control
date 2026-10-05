@@ -14,9 +14,6 @@ import hydra
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset
-
 from agilab_lib.datasets.latent_dataset import (
     CachedLatentDataset,
     DummyLatentPairDataset,
@@ -27,6 +24,8 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader, Dataset
 
 
 def get_dataset(
