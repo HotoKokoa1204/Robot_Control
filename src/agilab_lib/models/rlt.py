@@ -261,6 +261,7 @@ class RotationLatentTransformer(BaseLatentTransformer):
         if (
             sin_cos is None
             and isinstance(angle_deg, torch.Tensor)
+            and angle_deg.dim() >= 2
             and angle_deg.shape[-1] == 2
         ):
             sin_cos = angle_deg
@@ -419,7 +420,8 @@ class ChainedLatentTransformer(nn.Module):
         """Load pretrained state dictionary into a model if path or dict exists.
 
         Handles raw state dicts, nested dictionaries (e.g., 'state_dict',
-        'model_state_dict', 'forward_state_dict', 'rotation_state_dict', 'model'),
+        'model_state_dict', 'forward_state_dict', 'rotation_state_dict',
+        'forward_transformer', 'rotation_transformer', 'model'),
         and key prefix stripping ('module.', 'forward_transformer.',
         'rotation_transformer.').
 
@@ -444,13 +446,30 @@ class ChainedLatentTransformer(nn.Module):
             for candidate_key in (
                 "state_dict",
                 "model_state_dict",
-                "forward_state_dict",
-                "rotation_state_dict",
                 "model",
             ):
                 if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
                     ckpt = ckpt[candidate_key]
                     break
+
+            if isinstance(model, ForwardLatentTransformer):
+                for candidate_key in (
+                    "forward_transformer",
+                    "forward_state_dict",
+                    "forward",
+                ):
+                    if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
+                        ckpt = ckpt[candidate_key]
+                        break
+            elif isinstance(model, RotationLatentTransformer):
+                for candidate_key in (
+                    "rotation_transformer",
+                    "rotation_state_dict",
+                    "rotation",
+                ):
+                    if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
+                        ckpt = ckpt[candidate_key]
+                        break
 
             model_keys = set(model.state_dict().keys())
             if set(ckpt.keys()) == model_keys:

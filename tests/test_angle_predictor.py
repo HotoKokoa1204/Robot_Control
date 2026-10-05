@@ -10,7 +10,6 @@ import math
 import pytest
 import torch
 import torch.nn.functional as F
-
 from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
