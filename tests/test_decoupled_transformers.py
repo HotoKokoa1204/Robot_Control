@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn as nn
-
 from agilab_lib.datasets.latent_dataset import CachedLatentDataset
 from agilab_lib.models.rlt import (
     BaseLatentTransformer,
@@ -331,6 +330,7 @@ def test_chained_latent_transformer_mixed_batch_invariance() -> None:
     # 1: pure rotation (angle=30, dist=0)
     # 2: no motion (angle=0, dist=0)
     # 3: compound motion (angle=45, dist=2.0)
+    torch.manual_seed(42)
     z = torch.randn(4, 64)
     angles = torch.tensor([[0.0], [30.0], [0.0], [45.0]])
     dists = torch.tensor([[1.5], [0.0], [0.0], [2.0]])

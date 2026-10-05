@@ -16,8 +16,6 @@ from PIL import Image  # isort: skip # noqa: F401
 
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
@@ -27,6 +25,8 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import DictConfig, OmegaConf
+
 from scripts.train_multibranch import (
     get_dataset,
     save_all_checkpoints,
@@ -46,7 +46,7 @@ def test_config_loading() -> None:
     assert cfg.rotation_dir == "data/360"
     assert cfg.img_height == 108
     assert cfg.img_width == 192
-    assert cfg.preload_frames is False
+    assert cfg.preload_frames is True
     assert float(cfg.buffer_distance_meters) == 2.0
 
     # Model architecture parameters
@@ -57,10 +57,12 @@ def test_config_loading() -> None:
 
     # Optimization parameters
     assert float(cfg.lr) == 1e-4
+    assert float(cfg.lr_vae) == 1e-5
     assert cfg.batch_size == 16
     assert cfg.gradient_accumulation_steps == 2
     assert cfg.use_amp is True
-    assert cfg.max_epochs == 50
+    assert cfg.max_epochs == 100
+    assert cfg.warmup_vae_epochs == 50
 
     # Multi-branch loss weights
     assert float(cfg.alpha_perc) == 0.5
@@ -69,6 +71,10 @@ def test_config_loading() -> None:
     assert float(cfg.w_rot) == 1.0
     assert float(cfg.w_recon) == 1.0
     assert float(cfg.w_latent) == 1.0
+    assert float(cfg.w_latent_min) == 0.01
+    assert float(cfg.w_latent_max) == 1.0
+    assert cfg.w_latent_ramp_start_epoch == 61
+    assert float(cfg.sanity_check_min_std) == 15.0
 
     # Checkpoints
     assert cfg.output_dir == "checkpoints"
@@ -180,11 +186,12 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
             "hidden_dim": 32,
             "num_blocks": 2,
             "block_inner_dim": 32,
-            "lr": 1e-4,
+            "lr": 0.001,
             "batch_size": 4,
             "gradient_accumulation_steps": 2,
             "use_amp": torch.cuda.is_available(),
             "max_epochs": 4,
+            "warmup_vae_epochs": 0,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
             "w_fwd": 1.0,
@@ -298,6 +305,7 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
             "gradient_accumulation_steps": 2,
             "use_amp": torch.cuda.is_available(),
             "max_epochs": 1,
+            "warmup_vae_epochs": 0,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
             "w_fwd": 1.0,
@@ -317,3 +325,60 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
     )
     assert len(history["loss"]) == 1
     assert math.isfinite(history["loss"][0])
+
+
+def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
+    """Verify Stage 1 VAE warm-up, sanity gate validation, and Stage 2 transition."""
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=8,
+        img_height=108,
+        img_width=192,
+        seed=777,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+
+    out_dir = tmp_path / "two_stage_out"
+    # Stage 1: 2 epochs, Stage 2: 2 epochs (max_epochs=4)
+    cfg = OmegaConf.create(
+        {
+            "latent_dim": 64,
+            "hidden_dim": 32,
+            "num_blocks": 2,
+            "block_inner_dim": 32,
+            "lr": 1e-4,
+            "lr_vae": 1e-5,
+            "batch_size": 4,
+            "gradient_accumulation_steps": 1,
+            "use_amp": torch.cuda.is_available(),
+            "max_epochs": 4,
+            "warmup_vae_epochs": 2,
+            "w_latent_min": 0.01,
+            "w_latent_max": 1.0,
+            "w_latent_ramp_start_epoch": 3,
+            "sanity_check_min_std": 0.1,  # Low threshold for random dummy images
+            "alpha_perc": 0.5,
+            "beta_kl": 0.0001,
+            "w_fwd": 1.0,
+            "w_rot": 1.0,
+            "w_recon": 1.0,
+            "output_dir": str(out_dir),
+            "save_interval_epochs": 2,
+            "vae_checkpoint": None,
+            "device": "cuda" if torch.cuda.is_available() else "cpu",
+        }
+    )
+
+    trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
+    assert len(history["loss"]) == 4
+    # In Stage 1 (epoch 1 and 2), dynamics loss should be 0
+    # because stage1_recon_only is active
+    assert history["fwd"][0] == 0.0
+    assert history["rot"][0] == 0.0
+    # In Stage 2 (epoch 3 and 4), dynamics loss should be active (> 0)
+    assert history["fwd"][2] > 0.0
+    assert history["rot"][2] > 0.0

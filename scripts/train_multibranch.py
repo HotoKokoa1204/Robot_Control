@@ -24,8 +24,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -34,6 +32,7 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -278,9 +277,27 @@ def train_multibranch(
 
     loss_fn.to(device)
 
-    # 5. Optimizer setup
+    # 5. Optimizer and curriculum configuration
     lr = float(cfg.get("lr", 1e-4))
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    lr_vae = float(cfg.get("lr_vae", 1e-5))
+    warmup_vae_epochs = int(cfg.get("warmup_vae_epochs", 50))
+    w_latent_min = float(cfg.get("w_latent_min", 0.01))
+    w_latent_max = float(cfg.get("w_latent_max", 1.0))
+    w_latent_ramp_start_epoch = int(cfg.get("w_latent_ramp_start_epoch", 61))
+    sanity_check_min_std = float(cfg.get("sanity_check_min_std", 15.0))
+
+    def build_optimizer(is_stage2: bool) -> torch.optim.Optimizer:
+        if not is_stage2:
+            return torch.optim.Adam(model.parameters(), lr=lr)
+        param_groups = [
+            {"params": model.vae.parameters(), "lr": lr_vae},
+            {"params": model.forward_transformer.parameters(), "lr": lr},
+            {"params": model.rotation_transformer.parameters(), "lr": lr},
+        ]
+        return torch.optim.Adam(param_groups)
+
+    is_stage2 = warmup_vae_epochs <= 0
+    optimizer = build_optimizer(is_stage2)
 
     # 6. AMP and Gradient Accumulation setup
     use_amp = bool(cfg.get("use_amp", True))
@@ -290,7 +307,7 @@ def train_multibranch(
     accum_steps = max(1, int(cfg.get("gradient_accumulation_steps", 2)))
 
     # 7. Training loop parameters and telemetry tracking
-    max_epochs = int(cfg.get("max_epochs", 50))
+    max_epochs = int(cfg.get("max_epochs", 100))
     save_interval = int(cfg.get("save_interval_epochs", 5))
     output_dir = DualSourceVideoDataset._resolve_dir(
         cfg.get("output_dir", "checkpoints")
@@ -309,12 +326,38 @@ def train_multibranch(
 
     print(
         f"Starting training for {max_epochs} epochs "
-        f"(batch_size={batch_size}, accum_steps={accum_steps}, "
-        f"use_amp={use_amp})..."
+        f"(warmup_vae_epochs={warmup_vae_epochs}, batch_size={batch_size}, "
+        f"accum_steps={accum_steps}, use_amp={use_amp})..."
     )
 
     optimizer.zero_grad()
     for epoch in range(max_epochs):
+        epoch_num = epoch + 1
+        current_in_stage1 = epoch_num <= warmup_vae_epochs
+
+        # Check stage transition at boundary
+        if not current_in_stage1 and not is_stage2:
+            print(
+                f"\n=== Transitioning to Stage 2 at Epoch {epoch_num} ===\n"
+                f"Unfreezing full model with discriminative LR: "
+                f"VAE={lr_vae}, Transformers={lr}"
+            )
+            is_stage2 = True
+            optimizer = build_optimizer(is_stage2)
+            optimizer.zero_grad()
+
+        # Compute dynamic w_latent for current epoch
+        if current_in_stage1:
+            current_w_latent = 0.0
+        elif epoch_num < w_latent_ramp_start_epoch:
+            current_w_latent = w_latent_min
+        else:
+            denom = max(1, max_epochs - w_latent_ramp_start_epoch)
+            progress = min(1.0, (epoch_num - w_latent_ramp_start_epoch) / denom)
+            current_w_latent = w_latent_min + progress * (w_latent_max - w_latent_min)
+
+        loss_fn.w_latent = current_w_latent
+
         model.train()
         epoch_loss = 0.0
         epoch_recon = 0.0
@@ -326,9 +369,14 @@ def train_multibranch(
         epoch_rot_latent = 0.0
         num_batches = len(train_loader)
 
+        stage_desc = "Stage 1 (VAE)" if current_in_stage1 else "Stage 2 (Joint)"
+        iter_desc = (
+            f"{stage_desc} Ep {epoch_num:2d}/{max_epochs} "
+            f"[w_lat={current_w_latent:.3f}]"
+        )
         batch_iter = tqdm(
             train_loader,
-            desc=f"Epoch {epoch + 1:2d}/{max_epochs}",
+            desc=iter_desc,
             unit="batch",
             leave=False,
             dynamic_ncols=True,
@@ -348,7 +396,9 @@ def train_multibranch(
             with torch.amp.autocast(
                 "cuda", enabled=bool(use_amp and device.type == "cuda")
             ):
-                loss_output = loss_fn(model, batch)
+                loss_output = loss_fn.forward_model(
+                    model, batch, stage1_recon_only=current_in_stage1
+                )
                 total_loss = loss_output.total_loss
 
             # Telemetry accumulation from unscaled loss
@@ -385,6 +435,7 @@ def train_multibranch(
                 recon=f"{loss_output.metrics['loss_recon'].item():.3f}",
                 fwd=f"{loss_output.metrics['loss_fwd'].item():.3f}",
                 rot=f"{loss_output.metrics['loss_rot'].item():.3f}",
+                w_lat=f"{current_w_latent:.3f}",
             )
 
         # Compute average metrics across all batches for the epoch
@@ -409,17 +460,50 @@ def train_multibranch(
 
         if (epoch + 1) % 1 == 0 or (epoch + 1) == max_epochs:
             print(
-                f"Epoch {epoch + 1:3d}/{max_epochs} | "
+                f"Epoch {epoch + 1:3d}/{max_epochs} ({stage_desc}) | "
                 f"Loss: {avg_loss:.4f} | "
                 f"Recon: {avg_recon:.4f} | "
                 f"Fwd: {avg_fwd:.4f} | "
                 f"Rot: {avg_rot:.4f} | "
                 f"Perc: {avg_perc:.4f} | "
                 f"KL: {avg_kl:.6f} | "
+                f"w_lat: {current_w_latent:.3f} | "
                 f"FwdLat: {avg_fwd_latent:.6f} | "
                 f"RotLat: {avg_rot_latent:.6f}",
                 flush=True,
             )
+
+        # Stage 1 Sanity Gating at warmup boundary
+        if current_in_stage1 and epoch_num == warmup_vae_epochs:
+            model.eval()
+            print("\nEvaluating Stage 1 Autoencoder Sanity Gate...")
+            sample_stds: List[float] = []
+            with torch.no_grad():
+                for sample_idx, sample_batch in enumerate(train_loader):
+                    if sample_idx >= 5:
+                        break
+                    s_recon = (
+                        sample_batch.recon_frame
+                        if isinstance(sample_batch, DualSourceBatch)
+                        else sample_batch["recon_frame"]
+                    ).to(device)
+                    s_out, _, _ = model.forward_reconstruction(s_recon)
+                    # Convert to pixel range 0-255 for standard deviation evaluation
+                    s_out_px = s_out * 255.0
+                    sample_stds.append(float(s_out_px.std().item()))
+
+            avg_recon_std = sum(sample_stds) / max(1, len(sample_stds))
+            print(
+                f"Stage 1 Recon Pixel Standard Deviation: {avg_recon_std:.2f} "
+                f"(Threshold: {sanity_check_min_std:.2f})"
+            )
+            if avg_recon_std < sanity_check_min_std:
+                raise RuntimeError(
+                    f"Sanity Check Failed: Stage 1 Autoencoder reconstruction "
+                    f"std ({avg_recon_std:.2f}) is below threshold "
+                    f"({sanity_check_min_std:.2f}). Flat gray outputs detected!"
+                )
+            print("Sanity Check Passed! Autoencoder representations are diverse.\n")
 
         # Periodic checkpoint saving
         if save_interval > 0 and (epoch + 1) % save_interval == 0:

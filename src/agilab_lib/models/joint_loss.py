@@ -238,6 +238,7 @@ class JointNavigationLoss(nn.Module):
         self,
         model: nn.Module,
         batch: Union[Dict[str, Any], Any],
+        stage1_recon_only: bool = False,
     ) -> JointLossOutput:
         """Compute joint loss by executing multi-branch forward passes through model.
 
@@ -246,6 +247,8 @@ class JointNavigationLoss(nn.Module):
             batch: Paired batch (DualSourceBatch or dictionary) containing
                 'recon_frame', 'fwd_current', 'fwd_target', 'fwd_distance',
                 'rot_current', 'rot_target', and 'rot_sin_cos'.
+            stage1_recon_only: When True, executes only the Autoencoder reconstruction
+                branch and bypasses forward/rotation transformer branches.
 
         Returns:
             JointLossOutput containing total loss and detailed metrics dictionary.
@@ -256,6 +259,17 @@ class JointNavigationLoss(nn.Module):
         recon_frame = _extract_tensor(batch, "recon_frame", "x_t")
         if recon_frame is None:
             raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
+
+        # Branch 1: Reconstruction
+        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
+
+        if stage1_recon_only:
+            return self.forward(
+                recon_x=recon_x,
+                x_t=recon_frame,
+                mu_t=mu_t,
+                logvar_t=logvar_t,
+            )
 
         fwd_current = _extract_tensor(batch, "fwd_current")
         fwd_target = _extract_tensor(batch, "fwd_target")
@@ -277,9 +291,6 @@ class JointNavigationLoss(nn.Module):
             if isinstance(batch, dict)
             else getattr(batch, "rot_angle_deg", None)
         )
-
-        # Branch 1: Reconstruction
-        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
 
         # Branch 2: Forward translation dynamics
         pred_fwd = None

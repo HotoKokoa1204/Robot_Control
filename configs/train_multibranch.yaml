@@ -11,7 +11,7 @@ buffer_distance_meters: 2.0
 recon_source: "random"
 use_dummy_if_missing: true
 rotation_one_per_subfolder: true # Pick at most 1 rotation video per subfolder in data/360
-preload_frames: false # Set true to preload frames into RAM (~5GB for 88 videos, eliminates CPU bottleneck and maximizes GPU utilization)
+preload_frames: true # Set true to preload frames into RAM (~5GB for 88 videos, eliminates CPU bottleneck and maximizes GPU utilization)
 num_samples: 1600 # Pairs sampled per epoch (1600 = 100 batches; set null for full 2300 pairs)
 
 # Model architecture settings
@@ -25,7 +25,9 @@ lr: 0.0001
 batch_size: 16
 gradient_accumulation_steps: 2
 use_amp: true
-max_epochs: 50
+max_epochs: 100
+warmup_vae_epochs: 50
+lr_vae: 0.00001 # 1e-5 for unfrozen VAE in stage 2
 
 # Multi-branch loss weights
 alpha_perc: 0.5
@@ -33,7 +35,11 @@ beta_kl: 0.0001
 w_fwd: 1.0
 w_rot: 1.0
 w_recon: 1.0
-w_latent: 1.0
+w_latent: 1.0 # Base target weight (or max annealed weight)
+w_latent_min: 0.01
+w_latent_max: 1.0
+w_latent_ramp_start_epoch: 61 # Epoch 51-60 hold w_latent=0.01, Epoch 61-100 linear ramp to 1.0
+sanity_check_min_std: 15.0 # Quality gate at end of stage 1
 
 # Checkpoints and output settings
 output_dir: "checkpoints"
