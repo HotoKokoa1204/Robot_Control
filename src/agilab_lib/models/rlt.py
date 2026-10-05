@@ -258,6 +258,14 @@ class RotationLatentTransformer(BaseLatentTransformer):
         Returns:
             Predicted future Latent Vector of shape (B, latent_dim).
         """
+        if (
+            sin_cos is None
+            and isinstance(angle_deg, torch.Tensor)
+            and angle_deg.shape[-1] == 2
+        ):
+            sin_cos = angle_deg
+            angle_deg = None
+
         if sin_cos is None:
             if angle_deg is None:
                 angle_deg = torch.zeros(latent.shape[0], 1, device=latent.device)

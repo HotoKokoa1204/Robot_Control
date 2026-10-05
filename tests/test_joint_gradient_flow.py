@@ -12,7 +12,6 @@ from typing import Any, Dict
 from PIL import Image  # isort: skip # noqa: F401
 import pytest
 import torch
-
 from agilab_lib.models import (
     JointLossOutput,
     JointNavigationLoss,
@@ -162,8 +161,8 @@ def test_joint_loss_via_forward_model_and_batch_dict() -> None:
 
     batch = _generate_synthetic_batch(batch_size=2)
 
-    # Calling loss_fn(model, batch) directly
-    out = loss_fn(model, batch)
+    # Calling loss_fn(model, batch, stage=3) directly
+    out = loss_fn(model, batch, stage=3)
     assert isinstance(out, JointLossOutput)
     assert torch.isfinite(out.total_loss)
     assert out.total_loss.item() > 0.0
@@ -459,7 +458,7 @@ def test_cuda_gradient_flow() -> None:
     loss_fn = JointNavigationLoss().to(device)
 
     batch = _generate_synthetic_batch(batch_size=2, device=device)
-    out = loss_fn(model, batch)
+    out = loss_fn(model, batch, stage=3)
 
     assert out.total_loss.is_cuda
     assert torch.isfinite(out.total_loss)
@@ -474,3 +473,84 @@ def test_cuda_gradient_flow() -> None:
     assert model.forward_transformer.blocks[0].fc3.weight.grad.is_cuda
     assert model.rotation_transformer.blocks[0].fc3.weight.grad is not None
     assert model.rotation_transformer.blocks[0].fc3.weight.grad.is_cuda
+
+
+def test_stage2_gradient_isolation() -> None:
+    """Stage 2 gradient isolation: transformers get grads, frozen VAE gets none."""
+    model = JointNavigationModel()
+    with torch.no_grad():
+        for blk in model.forward_transformer.blocks:
+            torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
+            torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
+        for blk in model.rotation_transformer.blocks:
+            torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
+            torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
+
+    # Freeze VAE
+    model.vae.requires_grad_(False)
+
+    loss_fn = JointNavigationLoss()
+    batch = _generate_synthetic_batch(batch_size=2)
+
+    out = loss_fn.forward_model(model, batch, stage=2)
+    assert isinstance(out, JointLossOutput)
+    assert torch.isfinite(out.total_loss)
+    assert out.total_loss.item() > 0.0
+
+    model.zero_grad()
+    out.total_loss.backward()
+
+    # Transformers have requires_grad=True and must receive non-None gradients
+    fwd_grads = [
+        p.grad for p in model.forward_transformer.parameters() if p.requires_grad
+    ]
+    assert len(fwd_grads) > 0
+    assert any(g is not None and torch.any(g != 0) for g in fwd_grads)
+
+    rot_grads = [
+        p.grad for p in model.rotation_transformer.parameters() if p.requires_grad
+    ]
+    assert len(rot_grads) > 0
+    assert any(g is not None and torch.any(g != 0) for g in rot_grads)
+
+    # VAE parameters must receive NO gradients
+    for name, param in model.vae.named_parameters():
+        assert (
+            param.grad is None
+        ), f"VAE parameter {name} received unexpected gradient in stage 2"
+
+
+def test_stage3_gradient_isolation() -> None:
+    """Stage 3 gradient isolation: VAE gets grads when transformers are frozen."""
+    model = JointNavigationModel()
+    # Freeze transformers
+    model.forward_transformer.requires_grad_(False)
+    model.rotation_transformer.requires_grad_(False)
+
+    loss_fn = JointNavigationLoss()
+    batch = _generate_synthetic_batch(batch_size=2)
+
+    out = loss_fn.forward_model(model, batch, stage=3)
+    assert isinstance(out, JointLossOutput)
+    assert torch.isfinite(out.total_loss)
+    assert out.total_loss.item() > 0.0
+
+    model.zero_grad()
+    out.total_loss.backward()
+
+    # VAE encoder and decoder receive gradients
+    assert model.vae.encoder_cnn[0].weight.grad is not None
+    assert model.vae.fc_mu.weight.grad is not None
+    assert model.vae.fc_logvar.weight.grad is not None
+    assert model.vae.fc_decode.weight.grad is not None
+    assert model.vae.decoder_cnn[0].weight.grad is not None
+
+    # Frozen transformers receive NO gradients
+    for name, param in model.forward_transformer.named_parameters():
+        assert (
+            param.grad is None
+        ), f"forward_transformer {name} received grad in stage 3"
+    for name, param in model.rotation_transformer.named_parameters():
+        assert (
+            param.grad is None
+        ), f"rotation_transformer {name} received grad in stage 3"

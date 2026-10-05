@@ -8,7 +8,7 @@ Description: Joint multi-branch loss function coordinating reconstruction,
     perceptual and latent KL regularization.
 """
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 from PIL import Image  # isort: skip # noqa: F401
 import torch
@@ -16,6 +16,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from agilab_lib.models.perceptual import VGGPerceptualLoss
+
+if TYPE_CHECKING:
+    from agilab_lib.models.joint_navigation import JointNavigationModel
 
 
 def _extract_tensor(
@@ -236,34 +239,54 @@ class JointNavigationLoss(nn.Module):
 
     def forward_model(
         self,
-        model: nn.Module,
+        model: Union["JointNavigationModel", nn.Module, Any],
         batch: Union[Dict[str, Any], Any],
-        stage1_recon_only: bool = False,
+        stage: int = 1,
+        stage1_recon_only: Optional[bool] = None,
     ) -> JointLossOutput:
-        """Compute joint loss by executing multi-branch forward passes through model.
+        """Compute joint loss by executing stage-specific forward passes through model.
+
+        Supports three curriculum training stages:
+        - Stage 1: Autoencoder Reconstruction only. No transformer forward passes.
+        - Stage 2: Latent dynamics training with detached base latents (or frozen VAE).
+          Visual Dynamics Decoder decodes predictions. Reconstruction is inactive.
+        - Stage 3: End-to-end multi-branch joint training. Base latents encoded with
+          gradients; target latents detached; reconstruction active.
 
         Args:
             model: JointNavigationModel instance.
             batch: Paired batch (DualSourceBatch or dictionary) containing
                 'recon_frame', 'fwd_current', 'fwd_target', 'fwd_distance',
                 'rot_current', 'rot_target', and 'rot_sin_cos'.
-            stage1_recon_only: When True, executes only the Autoencoder reconstruction
-                branch and bypasses forward/rotation transformer branches.
+            stage: Training stage (1, 2, or 3). Defaults to 1.
+            stage1_recon_only: Legacy parameter for backwards compatibility.
+                When True, forces stage=1. When False, defaults to stage=3.
 
         Returns:
             JointLossOutput containing total loss and detailed metrics dictionary.
 
         Raises:
-            KeyError: If required keys are missing from batch.
+            ValueError: If stage is not 1, 2, or 3.
+            KeyError: If required keys are missing from batch for the selected stage.
         """
-        recon_frame = _extract_tensor(batch, "recon_frame", "x_t")
-        if recon_frame is None:
-            raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
+        # Retain backwards-compatibility if stage1_recon_only is passed
+        if stage1_recon_only is not None:
+            if stage1_recon_only:
+                stage = 1
+            else:
+                if stage == 1:
+                    stage = 3
 
-        # Branch 1: Reconstruction
-        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
+        if stage not in (1, 2, 3):
+            raise ValueError(f"Invalid stage={stage}. Must be 1, 2, or 3.")
 
-        if stage1_recon_only:
+        # Stage 1: Autoencoder Reconstruction Only
+        if stage == 1:
+            recon_frame = _extract_tensor(batch, "recon_frame", "x_t")
+            if recon_frame is None:
+                raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
+
+            recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
             return self.forward(
                 recon_x=recon_x,
                 x_t=recon_frame,
@@ -271,55 +294,93 @@ class JointNavigationLoss(nn.Module):
                 logvar_t=logvar_t,
             )
 
+        # Common extraction for dynamics branches (Stages 2 and 3)
         fwd_current = _extract_tensor(batch, "fwd_current")
         fwd_target = _extract_tensor(batch, "fwd_target")
-        fwd_distance = (
-            batch.get("fwd_distance")
-            if isinstance(batch, dict)
-            else getattr(batch, "fwd_distance", None)
-        )
+        fwd_distance = _extract_tensor(batch, "fwd_distance")
+        if fwd_distance is None:
+            if isinstance(batch, dict) and "fwd_distance" in batch:
+                fwd_distance = batch["fwd_distance"]
+            elif hasattr(batch, "fwd_distance"):
+                fwd_distance = getattr(batch, "fwd_distance")
 
         rot_current = _extract_tensor(batch, "rot_current")
         rot_target = _extract_tensor(batch, "rot_target")
-        rot_sin_cos = (
-            batch.get("rot_sin_cos")
-            if isinstance(batch, dict)
-            else getattr(batch, "rot_sin_cos", None)
-        )
-        rot_angle_deg = (
-            batch.get("rot_angle_deg")
-            if isinstance(batch, dict)
-            else getattr(batch, "rot_angle_deg", None)
-        )
+        rot_sin_cos = _extract_tensor(batch, "rot_sin_cos")
+        if rot_sin_cos is None:
+            if isinstance(batch, dict) and "rot_sin_cos" in batch:
+                rot_sin_cos = batch["rot_sin_cos"]
+            elif hasattr(batch, "rot_sin_cos"):
+                rot_sin_cos = getattr(batch, "rot_sin_cos")
 
-        # Branch 2: Forward translation dynamics
+        rot_angle_deg = _extract_tensor(batch, "rot_angle_deg")
+        if rot_angle_deg is None:
+            if isinstance(batch, dict) and "rot_angle_deg" in batch:
+                rot_angle_deg = batch["rot_angle_deg"]
+            elif hasattr(batch, "rot_angle_deg"):
+                rot_angle_deg = getattr(batch, "rot_angle_deg")
+
+        # Forward dynamics execution
         pred_fwd = None
         pred_fwd_latent = None
+        mu_fwd_target = None
         if fwd_current is not None and fwd_distance is not None:
-            pred_fwd, pred_fwd_latent, _ = model.forward_translation(
-                x_t=fwd_current,
-                distance_meters=fwd_distance,
-            )
+            if stage == 2:
+                mu_fwd_base = model.vae.encode(fwd_current)[0].detach()
+            else:
+                mu_fwd_base = model.vae.encode(fwd_current)[0]
 
-        # Branch 3: Rotation dynamics
+            pred_fwd_latent = model.forward_transformer(
+                mu_fwd_base, distance_meters=fwd_distance
+            )
+            pred_fwd = model.vae.decode(pred_fwd_latent)
+
+            if fwd_target is not None:
+                mu_fwd_target = model.vae.encode(fwd_target)[0].detach()
+
+        # Rotation dynamics execution
         pred_rot = None
         pred_rot_latent = None
+        mu_rot_target = None
         if rot_current is not None and (
             rot_sin_cos is not None or rot_angle_deg is not None
         ):
-            pred_rot, pred_rot_latent, _ = model.forward_rotation(
-                x_t=rot_current,
-                sin_cos=rot_sin_cos,
-                angle_deg=rot_angle_deg,
+            if stage == 2:
+                mu_rot_base = model.vae.encode(rot_current)[0].detach()
+            else:
+                mu_rot_base = model.vae.encode(rot_current)[0]
+
+            if rot_sin_cos is not None:
+                pred_rot_latent = model.rotation_transformer(
+                    mu_rot_base, sin_cos=rot_sin_cos
+                )
+            else:
+                pred_rot_latent = model.rotation_transformer(
+                    mu_rot_base, angle_deg=rot_angle_deg
+                )
+            pred_rot = model.vae.decode(pred_rot_latent)
+
+            if rot_target is not None:
+                mu_rot_target = model.vae.encode(rot_target)[0].detach()
+
+        if stage == 2:
+            return self.forward(
+                pred_fwd=pred_fwd,
+                target_fwd=fwd_target,
+                pred_rot=pred_rot,
+                target_rot=rot_target,
+                pred_fwd_latent=pred_fwd_latent,
+                mu_fwd_target=mu_fwd_target,
+                pred_rot_latent=pred_rot_latent,
+                mu_rot_target=mu_rot_target,
             )
 
-        mu_fwd_target = None
-        if fwd_target is not None:
-            mu_fwd_target = model.vae.encode(fwd_target)[0].detach()
+        # Stage 3: End-to-end multi-branch with reconstruction
+        recon_frame = _extract_tensor(batch, "recon_frame", "x_t")
+        if recon_frame is None:
+            raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
 
-        mu_rot_target = None
-        if rot_target is not None:
-            mu_rot_target = model.vae.encode(rot_target)[0].detach()
+        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
 
         return self.forward(
             recon_x=recon_x,
@@ -351,6 +412,8 @@ class JointNavigationLoss(nn.Module):
         pred_rot_latent: Optional[torch.Tensor] = None,
         mu_rot_target: Optional[torch.Tensor] = None,
         *,
+        stage: Optional[int] = None,
+        stage1_recon_only: Optional[bool] = None,
         recon_x: Optional[torch.Tensor] = None,
         x_t: Optional[torch.Tensor] = None,
         target_recon: Optional[torch.Tensor] = None,
@@ -385,6 +448,9 @@ class JointNavigationLoss(nn.Module):
             mu_fwd_target: Ground-truth forward target latent vector (B, latent_dim).
             pred_rot_latent: Predicted rotation latent vector (B, latent_dim).
             mu_rot_target: Ground-truth rotation target latent vector (B, latent_dim).
+            stage: Optional curriculum stage (1, 2, or 3) when dispatching
+                model and batch.
+            stage1_recon_only: Optional legacy stage 1 flag.
             recon_x: Keyword argument for reconstructed frame (B, 3, H, W).
             x_t: Keyword argument for reconstruction target frame (B, 3, H, W).
             target_recon: Alias for x_t.
@@ -409,11 +475,26 @@ class JointNavigationLoss(nn.Module):
         """
         # Handle model + batch dispatch
         if model is not None and batch is not None:
-            return self.forward_model(model, batch)
+            stage_arg = 1 if stage is None else stage
+            return self.forward_model(
+                model, batch, stage=stage_arg, stage1_recon_only=stage1_recon_only
+            )
         if isinstance(predictions, nn.Module) and targets is not None:
-            return self.forward_model(predictions, targets)
+            stage_arg = 1 if stage is None else stage
+            return self.forward_model(
+                predictions,
+                targets,
+                stage=stage_arg,
+                stage1_recon_only=stage1_recon_only,
+            )
         if isinstance(targets, nn.Module) and predictions is not None:
-            return self.forward_model(targets, predictions)
+            stage_arg = 1 if stage is None else stage
+            return self.forward_model(
+                targets,
+                predictions,
+                stage=stage_arg,
+                stage1_recon_only=stage1_recon_only,
+            )
 
         # Handle positional tensor inputs: (recon_x, x_t, mu_t, ...)
         if isinstance(predictions, torch.Tensor):
