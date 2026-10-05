@@ -21,13 +21,18 @@ num_blocks: 5
 block_inner_dim: 512
 
 # Optimization hyperparameters
-lr: 0.0001
+lr: 0.0001 # Learning rate for transformers in Stage 2
+lr_vae_stage1: 0.0001 # Learning rate for VAE in Stage 1
+lr_vae_stage3: 0.00001 # Fine-tuning learning rate for VAE in Stage 3
+lr_vae: 0.00001 # Backwards compatibility alias for lr_vae_stage3
 batch_size: 16
 gradient_accumulation_steps: 2
 use_amp: true
-max_epochs: 100
-warmup_vae_epochs: 50
-lr_vae: 0.00001 # 1e-5 for unfrozen VAE in stage 2
+max_epochs: 150
+stage1_epochs: 50
+stage2_epochs: 50
+stage3_epochs: 50
+warmup_vae_epochs: 50 # Backwards compatibility alias for stage1_epochs
 
 # Multi-branch loss weights
 alpha_perc: 0.5
@@ -35,11 +40,11 @@ beta_kl: 0.0001
 w_fwd: 1.0
 w_rot: 1.0
 w_recon: 1.0
-w_latent: 1.0 # Base target weight (or max annealed weight)
+w_latent: 1.0 # Target weight for latent dynamics alignment
 w_latent_min: 0.01
 w_latent_max: 1.0
-w_latent_ramp_start_epoch: 61 # Epoch 51-60 hold w_latent=0.01, Epoch 61-100 linear ramp to 1.0
-sanity_check_min_std: 15.0 # Quality gate at end of stage 1
+w_latent_ramp_start_epoch: 61
+sanity_check_min_std: 15.0 # Quality gate threshold at end of Stage 1
 
 # Checkpoints and output settings
 output_dir: "checkpoints"
