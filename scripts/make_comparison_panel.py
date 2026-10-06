@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceVideoDataset,
     dual_source_collate_fn,
@@ -115,7 +116,7 @@ def main() -> None:
         deg = math.degrees(math.atan2(s, c))
 
         axes[i, 0].imshow(fwd_curr[i])
-        axes[i, 0].set_ylabel(f"Pair #{i+1}", fontsize=11, fontweight="bold")
+        axes[i, 0].set_ylabel(f"Pair #{i + 1}", fontsize=11, fontweight="bold")
         axes[i, 0].set_xticks([])
         axes[i, 0].set_yticks([])
 
