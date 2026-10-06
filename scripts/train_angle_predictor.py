@@ -10,9 +10,6 @@ from typing import List, Optional, Tuple
 import hydra
 import torch
 import torch.nn.functional as F
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset
-
 from agilab_lib.datasets.latent_dataset import (
     CachedLatentDataset,
     DummyLatentPairDataset,
@@ -20,7 +17,12 @@ from agilab_lib.datasets.latent_dataset import (
 from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
-from agilab_lib.utils.storage import resolve_project_path
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader, Dataset
 
 
 def get_dataset(
@@ -223,7 +225,7 @@ def main(cfg: DictConfig) -> None:
     run_validation_inference(model, cfg, device)
 
     # Save trained checkpoint
-    output_path = resolve_project_path(str(cfg.output_checkpoint))
+    output_path = ensure_writable_output_path(str(cfg.output_checkpoint))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), output_path)
     print(f"Model checkpoint successfully saved to: {output_path}")

@@ -11,15 +11,17 @@ from pathlib import Path
 
 import hydra
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
 )
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.keyframes import extract_keyframe_indices
-from agilab_lib.utils.storage import resolve_project_path
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
+from omegaconf import DictConfig, OmegaConf
 
 
 def extract_keyframes(cfg: DictConfig) -> Path:
@@ -75,7 +77,7 @@ def extract_keyframes(cfg: DictConfig) -> Path:
         "keyframe_indices": keyframe_indices,
     }
 
-    output_path = resolve_project_path(str(cfg.output_json))
+    output_path = ensure_writable_output_path(str(cfg.output_json))
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", encoding="utf-8") as f:

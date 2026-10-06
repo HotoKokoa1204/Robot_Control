@@ -38,7 +38,10 @@ from agilab_lib.models.vae import VAE  # noqa: E402
 from agilab_lib.utils.interpolation import (  # noqa: E402
     linear_interpolate_latent_sequence,
 )
-from agilab_lib.utils.storage import resolve_project_path  # noqa: E402
+from agilab_lib.utils.storage import (  # noqa: E402
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 
 
 def render_frames_to_video(
@@ -250,7 +253,7 @@ def generate_video(cfg: DictConfig) -> str:
         output_frames.append(frame_bgr)
 
     # 9. Write MP4 video
-    out_video_path = resolve_project_path(str(cfg.output_video))
+    out_video_path = ensure_writable_output_path(str(cfg.output_video))
     render_frames_to_video(output_frames, out_video_path, fps=int(cfg.fps))
     print(f"Successfully generated video saved to: {out_video_path}")
     return str(out_video_path)

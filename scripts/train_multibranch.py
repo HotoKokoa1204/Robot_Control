@@ -25,8 +25,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -35,7 +33,11 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
-from agilab_lib.utils.storage import resolve_project_path  # noqa: E402
+from agilab_lib.utils.storage import (  # noqa: E402
+    ensure_writable_output_path,
+    resolve_project_path,
+)
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -509,7 +511,7 @@ def train_multibranch(
 
     # 7. Training loop parameters and telemetry tracking
     save_interval = int(cfg.get("save_interval_epochs", 5))
-    output_dir = resolve_project_path(cfg.get("output_dir", "checkpoints"))
+    output_dir = ensure_writable_output_path(cfg.get("output_dir", "checkpoints"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     history: Dict[str, List[float]] = {

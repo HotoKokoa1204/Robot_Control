@@ -8,9 +8,10 @@ Description: Unit tests for canonical project root and storage path resolution s
 from pathlib import Path
 
 import pytest
-
 from agilab_lib.datasets.dual_source_dataset import DualSourceVideoDataset
 from agilab_lib.utils.storage import (
+    _get_project_subdir,
+    ensure_writable_output_path,
     get_cache_dir,
     get_checkpoints_dir,
     get_data_dir,
@@ -183,3 +184,41 @@ def test_dual_source_dataset_resolve_dir_delegation(
         DualSourceVideoDataset._resolve_dir("data/one_path")
         == (root / "data" / "one_path").resolve()
     )
+
+
+def test_ensure_writable_output_path_valid() -> None:
+    """Verify ensure_writable_output_path allows valid output targets."""
+    root = get_project_root()
+    outputs_path = ensure_writable_output_path("outputs/test.json")
+    assert outputs_path == (root / "outputs" / "test.json").resolve()
+
+    cache_path = ensure_writable_output_path(".cache/test.npy")
+    assert cache_path == (root / ".cache" / "test.npy").resolve()
+
+    checkpoints_path = ensure_writable_output_path(Path("checkpoints/model.pt"))
+    assert checkpoints_path == (root / "checkpoints" / "model.pt").resolve()
+
+
+def test_ensure_writable_output_path_data_boundary_violation() -> None:
+    """Verify ensure_writable_output_path raises PermissionError for data/ paths."""
+    pattern = r"Storage boundary violation: data/ is strictly read-only"
+
+    with pytest.raises(PermissionError, match=pattern):
+        ensure_writable_output_path("data/test.json")
+
+    with pytest.raises(PermissionError, match=pattern):
+        ensure_writable_output_path("data/latents/test.pt")
+
+    with pytest.raises(PermissionError, match=pattern):
+        ensure_writable_output_path("data")
+
+    with pytest.raises(PermissionError, match=pattern):
+        ensure_writable_output_path(get_data_dir() / "nested/artifact.mp4")
+
+
+def test_get_project_subdir_helper() -> None:
+    """Verify _get_project_subdir resolves subdirectories canonically."""
+    root = get_project_root()
+    assert _get_project_subdir("outputs") == (root / "outputs").resolve()
+    assert _get_project_subdir("outputs", "sub") == (root / "outputs" / "sub").resolve()
+    assert _get_project_subdir("data", Path("sub")) == (root / "data" / "sub").resolve()

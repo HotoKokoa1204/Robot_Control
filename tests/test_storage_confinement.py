@@ -22,6 +22,7 @@ import pytest
 import torch
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
     get_cache_dir,
     get_checkpoints_dir,
     get_data_dir,
@@ -71,6 +72,27 @@ def _is_relative_to(path: Path, base: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _get_main_repo_root() -> Path:
+    """Derive canonical repository root, handling worktree checkouts dynamically.
+
+    Returns:
+        Path to main repository root.
+    """
+    root = get_project_root()
+    if root.parent.name in (".worktrees", "worktrees"):
+        return root.parent.parent
+    return root
+
+
+def _get_outer_workspace_root() -> Path:
+    """Derive outer workspace root containing the project repository.
+
+    Returns:
+        Path to outer workspace root.
+    """
+    return _get_main_repo_root().parent
 
 
 @pytest.fixture
@@ -420,9 +442,9 @@ def test_invariant_workspace_root_invocation_from_outer_workspace(
         monkeypatch: Pytest monkeypatch fixture.
     """
     root = get_project_root()
-    outer_workspace = Path("E:/github/Robot_Control")
+    outer_workspace = _get_outer_workspace_root()
     if not outer_workspace.is_dir():
-        pytest.skip("Outer workspace root E:/github/Robot_Control not found.")
+        pytest.skip(f"Outer workspace root {outer_workspace} not found.")
 
     monkeypatch.chdir(outer_workspace)
     assert Path.cwd() == outer_workspace.resolve()
@@ -452,12 +474,12 @@ def test_invariant_workspace_root_invocation_from_outer_workspace(
 
 
 def test_outer_workspace_root_contains_no_leaked_directories() -> None:
-    """Verify the outer Robot_Control workspace root does not contain outputs,
+    """Verify the outer workspace root does not contain outputs,
     checkpoints, or data directories.
     """
-    outer_workspace = Path("E:/github/Robot_Control")
+    outer_workspace = _get_outer_workspace_root()
     if not outer_workspace.is_dir():
-        pytest.skip("Outer workspace root E:/github/Robot_Control not accessible.")
+        pytest.skip(f"Outer workspace root {outer_workspace} not accessible.")
 
     assert not (
         outer_workspace / "outputs"
@@ -578,7 +600,6 @@ def test_git_status_cleanliness_no_artifact_clutter() -> None:
     status_output = proc.stdout.strip()
     lines = [line.strip() for line in status_output.splitlines() if line.strip()]
 
-    known_untracked = {"scripts/diagnose_rotation_pairs.py"}
     artifact_extensions = {".mp4", ".png", ".npy", ".pt", ".pth", ".log", ".db3"}
     forbidden_prefixes = ("outputs/", "checkpoints/", ".cache/", "data/")
 
@@ -586,9 +607,6 @@ def test_git_status_cleanliness_no_artifact_clutter() -> None:
     for line in lines:
         if line.startswith("??"):
             path_str = line[2:].strip().strip('"').replace("\\", "/")
-            if path_str in known_untracked:
-                continue
-
             if any(path_str.startswith(prefix) for prefix in forbidden_prefixes):
                 untracked_clutter.append(path_str)
             elif any(path_str.endswith(ext) for ext in artifact_extensions):
@@ -600,10 +618,10 @@ def test_git_status_cleanliness_no_artifact_clutter() -> None:
 
 
 def test_main_repo_git_status_cleanliness() -> None:
-    """Verify git status in main repo reports no artifact clutter."""
-    main_repo = Path("E:/github/Robot_Control/Visual_Navigation_System")
+    """Verify git status in main repo reports strictly empty status."""
+    main_repo = _get_main_repo_root()
     if not (main_repo.is_dir() and (main_repo / ".git").exists()):
-        pytest.skip("Main Visual_Navigation_System repo directory not found.")
+        pytest.skip("Main repo directory not found.")
 
     proc = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -613,27 +631,9 @@ def test_main_repo_git_status_cleanliness() -> None:
         check=True,
     )
     status_output = proc.stdout.strip()
-    lines = [line.strip() for line in status_output.splitlines() if line.strip()]
-
-    known_untracked = {"scripts/diagnose_rotation_pairs.py"}
-    artifact_extensions = {".mp4", ".png", ".npy", ".pt", ".pth", ".log", ".db3"}
-    forbidden_prefixes = ("outputs/", "checkpoints/", ".cache/", "data/")
-
-    untracked_clutter: List[str] = []
-    for line in lines:
-        if line.startswith("??"):
-            path_str = line[2:].strip().strip('"').replace("\\", "/")
-            if path_str in known_untracked:
-                continue
-
-            if any(path_str.startswith(prefix) for prefix in forbidden_prefixes):
-                untracked_clutter.append(path_str)
-            elif any(path_str.endswith(ext) for ext in artifact_extensions):
-                untracked_clutter.append(path_str)
-
     assert (
-        not untracked_clutter
-    ), f"Untracked artifact clutter in main repo: {untracked_clutter}"
+        not status_output
+    ), f"Git status in main repo is not strictly empty:\n{status_output}"
 
 
 def test_gitignore_guards_outputs_and_checkpoints_from_clutter() -> None:
@@ -670,3 +670,51 @@ def test_gitignore_guards_outputs_and_checkpoints_from_clutter() -> None:
         for f in (test_output_file, test_ckpt_file, test_cache_file):
             if f.is_file():
                 f.unlink()
+
+
+def test_storage_confinement_writing_output_to_data_raises_permission_error() -> None:
+    """Verify writing outputs to data/ raises PermissionError across APIs
+    and scripts.
+    """
+    root = get_project_root()
+
+    # 1. API level: ensure_writable_output_path
+    with pytest.raises(
+        PermissionError,
+        match="Storage boundary violation: data/ is strictly read-only",
+    ):
+        ensure_writable_output_path("data/unauthorized_output.json")
+
+    with pytest.raises(
+        PermissionError,
+        match="Storage boundary violation: data/ is strictly read-only",
+    ):
+        ensure_writable_output_path(root / "data" / "sub" / "output.mp4")
+
+    # 2. Script level: extract_keyframes with output targeting data/
+    cfg_kf = OmegaConf.load(root / "configs" / "extract_keyframes.yaml")
+    cfg_kf.output_json = "data/unauthorized_kf.json"
+    cfg_kf.video_path = "non_existent.mp4"
+    cfg_kf.use_dummy_if_missing = True
+
+    with pytest.raises(
+        PermissionError,
+        match="Storage boundary violation: data/ is strictly read-only",
+    ):
+        extract_keyframes(cfg_kf)
+
+    # 3. Script level: generate_video with output targeting data/
+    cfg_gen = OmegaConf.load(root / "configs" / "generate_video.yaml")
+    cfg_gen.output_video = "data/unauthorized_gen.mp4"
+    cfg_gen.video_path = "non_existent.mp4"
+    cfg_gen.keyframes_json = "non_existent.json"
+    cfg_gen.use_dummy_if_missing = True
+    cfg_gen.interp_steps = 1
+    cfg_gen.use_chained_transformer = False
+    cfg_gen.use_rrdn = False
+
+    with pytest.raises(
+        PermissionError,
+        match="Storage boundary violation: data/ is strictly read-only",
+    ):
+        generate_video(cfg_gen)

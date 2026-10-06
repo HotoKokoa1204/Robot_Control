@@ -17,6 +17,7 @@ from agilab_lib.utils.interpolation import (
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.pca import BatchedPCA
 from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
     get_cache_dir,
     get_checkpoints_dir,
     get_data_dir,
@@ -39,4 +40,5 @@ __all__ = [
     "get_checkpoints_dir",
     "get_data_dir",
     "get_cache_dir",
+    "ensure_writable_output_path",
 ]

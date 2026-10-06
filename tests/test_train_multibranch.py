@@ -18,8 +18,6 @@ from PIL import Image  # isort: skip # noqa: F401
 
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
@@ -30,6 +28,8 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import DictConfig, OmegaConf
+
 from scripts.train_multibranch import (
     get_dataset,
     plot_loss_curves,
