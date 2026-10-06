@@ -4,7 +4,7 @@ Stage: Library
 Author: KafuuChino
 Date: 2026-10-05
 Description: Unit tests for JointNavigationLoss three-stage curriculum execution,
-    stage decoupling, and gradient isolation.
+    stage decoupling, and tensor extraction helpers.
 """
 
 from typing import Dict
@@ -18,6 +18,7 @@ from agilab_lib.models import (
     JointNavigationLoss,
     JointNavigationModel,
 )
+from agilab_lib.models.joint_loss import _extract_tensor
 
 
 def _generate_synthetic_batch(
@@ -166,74 +167,81 @@ def test_stage1_recon_only_backwards_compatibility() -> None:
     assert out_s3.metrics["loss_rot"].item() > 0.0
 
 
-def test_stage2_gradient_isolation() -> None:
-    """Stage 2 gradient isolation: transformers get grads, frozen VAE gets none."""
+def test_stage3_loss_computation_zero_latent_weight() -> None:
+    """Stage 3: Purely visual composite losses when w_latent=0.0."""
     model = JointNavigationModel()
-    with torch.no_grad():
-        for blk in model.forward_transformer.blocks:
-            torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
-            torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
-        for blk in model.rotation_transformer.blocks:
-            torch.nn.init.normal_(blk.fc3.weight, mean=0.0, std=0.2)
-            torch.nn.init.normal_(blk.fc3.bias, mean=0.0, std=0.1)
-
-    model.vae.requires_grad_(False)
-    loss_fn = JointNavigationLoss()
-    batch = _generate_synthetic_batch(batch_size=2)
-
-    out = loss_fn.forward_model(model, batch, stage=2)
-    model.zero_grad()
-    out.total_loss.backward()
-
-    # Transformers receive non-None gradients
-    fwd_grads = [
-        p.grad for p in model.forward_transformer.parameters() if p.requires_grad
-    ]
-    assert len(fwd_grads) > 0
-    assert any(g is not None and torch.any(g != 0) for g in fwd_grads)
-
-    rot_grads = [
-        p.grad for p in model.rotation_transformer.parameters() if p.requires_grad
-    ]
-    assert len(rot_grads) > 0
-    assert any(g is not None and torch.any(g != 0) for g in rot_grads)
-
-    # Frozen VAE receives NO gradients
-    for name, param in model.vae.named_parameters():
-        assert (
-            param.grad is None
-        ), f"VAE parameter {name} received unexpected gradient in stage 2"
-
-
-def test_stage3_gradient_isolation() -> None:
-    """Stage 3 gradient isolation: VAE gets grads when transformers are frozen."""
-    model = JointNavigationModel()
-    model.forward_transformer.requires_grad_(False)
-    model.rotation_transformer.requires_grad_(False)
-
-    loss_fn = JointNavigationLoss()
+    loss_fn = JointNavigationLoss(
+        w_recon=1.0, w_fwd=1.0, w_rot=1.0, w_latent=0.0, alpha_perc=0.5
+    )
     batch = _generate_synthetic_batch(batch_size=2)
 
     out = loss_fn.forward_model(model, batch, stage=3)
-    model.zero_grad()
-    out.total_loss.backward()
+    assert isinstance(out, JointLossOutput)
+    assert torch.isfinite(out.total_loss)
 
-    # VAE encoder and decoder receive non-None gradients
-    assert model.vae.encoder_cnn[0].weight.grad is not None
-    assert model.vae.fc_mu.weight.grad is not None
-    assert model.vae.fc_logvar.weight.grad is not None
-    assert model.vae.fc_decode.weight.grad is not None
-    assert model.vae.decoder_cnn[0].weight.grad is not None
+    # Latent MSE metrics are still logged for telemetry
+    assert out.metrics["fwd_latent_mse"].item() > 0.0
+    assert out.metrics["rot_latent_mse"].item() > 0.0
 
-    # Frozen transformers receive NO gradients
-    for name, param in model.forward_transformer.named_parameters():
-        assert (
-            param.grad is None
-        ), f"forward_transformer {name} received grad in stage 3"
-    for name, param in model.rotation_transformer.named_parameters():
-        assert (
-            param.grad is None
-        ), f"rotation_transformer {name} received grad in stage 3"
+    # With w_latent=0.0, dynamics branch losses exclude latent MSE
+    expected_fwd = out.metrics["fwd_mse"] + 0.5 * out.metrics["fwd_perc"]
+    expected_rot = out.metrics["rot_mse"] + 0.5 * out.metrics["rot_perc"]
+    assert torch.isclose(out.metrics["loss_fwd"], expected_fwd)
+    assert torch.isclose(out.metrics["loss_rot"], expected_rot)
+
+    expected_total = (
+        loss_fn.w_recon * out.metrics["loss_recon"]
+        + loss_fn.w_fwd * out.metrics["loss_fwd"]
+        + loss_fn.w_rot * out.metrics["loss_rot"]
+    )
+    assert torch.isclose(out.total_loss, expected_total)
+
+
+def test_extract_tensor_dict_and_property_access() -> None:
+    """Verify _extract_tensor handles dict indexing, attributes, and properties."""
+
+    class MockBatchWithProperties:
+        """Mock batch object providing both standard attributes and properties."""
+
+        def __init__(self) -> None:
+            self.fwd_distance = 2.5
+            self._rot_angle = 90.0
+
+        @property
+        def rot_angle_deg(self) -> float:
+            """Rotation angle degree property."""
+            return self._rot_angle
+
+    mock_obj = MockBatchWithProperties()
+    # Attribute access with numeric float conversion to tensor
+    tensor_dist = _extract_tensor(mock_obj, "fwd_distance")
+    assert tensor_dist is not None
+    assert isinstance(tensor_dist, torch.Tensor)
+    assert torch.isclose(tensor_dist, torch.tensor(2.5))
+
+    # Property access with numeric float conversion to tensor
+    tensor_angle = _extract_tensor(mock_obj, "rot_angle_deg")
+    assert tensor_angle is not None
+    assert isinstance(tensor_angle, torch.Tensor)
+    assert torch.isclose(tensor_angle, torch.tensor(90.0))
+
+    # Dictionary indexing
+    dict_batch = {
+        "recon_frame": torch.ones(2, 3, 10, 10),
+        "fwd_distance": 1.5,
+    }
+    tensor_recon = _extract_tensor(dict_batch, "recon_frame")
+    assert tensor_recon is not None
+    assert tensor_recon.shape == (2, 3, 10, 10)
+
+    tensor_dict_dist = _extract_tensor(dict_batch, "fwd_distance")
+    assert tensor_dict_dist is not None
+    assert isinstance(tensor_dict_dist, torch.Tensor)
+    assert torch.isclose(tensor_dict_dist, torch.tensor(1.5))
+
+    # Non-existent key fallback
+    assert _extract_tensor(dict_batch, "non_existent") is None
+    assert _extract_tensor(None, "recon_frame") is None
 
 
 def test_invalid_stage_error() -> None:

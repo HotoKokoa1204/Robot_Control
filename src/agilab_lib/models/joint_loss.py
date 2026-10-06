@@ -11,6 +11,7 @@ Description: Joint multi-branch loss function coordinating reconstruction,
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 from PIL import Image  # isort: skip # noqa: F401
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,31 +23,56 @@ if TYPE_CHECKING:
 
 
 def _extract_tensor(
-    container: Any,
-    *keys: str,
+    batch: Any,
+    key: str,
+    *alt_keys: str,
 ) -> Optional[torch.Tensor]:
-    """Helper to extract a tensor from a dictionary or batch object.
+    """Helper to extract a tensor from a dictionary, batch object, or container.
+
+    Checks dictionary indexing (`batch[key]`), attribute access (`getattr(batch, key)`),
+    and properties, converting numeric values to tensors if necessary.
 
     Args:
-        container: Dictionary, DualSourceBatch, or object holding tensors.
-        *keys: Candidate key names to search for.
+        batch: Dictionary, DualSourceBatch, or object holding tensors.
+        key: Primary candidate key name to search for.
+        *alt_keys: Additional fallback candidate key names.
 
     Returns:
         Found tensor or None.
     """
-    if container is None:
+    if batch is None:
         return None
-    if isinstance(container, dict):
-        for k in keys:
-            if k in container and container[k] is not None:
-                val = container[k]
-                if isinstance(val, torch.Tensor):
-                    return val
+
+    keys = (key,) + alt_keys
     for k in keys:
-        if hasattr(container, k):
-            val = getattr(container, k)
-            if val is not None and isinstance(val, torch.Tensor):
+        val = None
+
+        # 1. Dictionary indexing
+        if isinstance(batch, dict) or hasattr(batch, "__getitem__"):
+            try:
+                if k in batch and batch[k] is not None:
+                    val = batch[k]
+            except (TypeError, KeyError, IndexError):
+                pass
+
+        # 2. Attribute / property access
+        if val is None and hasattr(batch, k):
+            try:
+                attr_val = getattr(batch, k)
+                if attr_val is not None:
+                    val = attr_val
+            except Exception:
+                pass
+
+        if val is not None:
+            if isinstance(val, torch.Tensor):
                 return val
+            if isinstance(val, (int, float, list, tuple, np.ndarray)):
+                try:
+                    return torch.as_tensor(val, dtype=torch.float32)
+                except Exception:
+                    pass
+
     return None
 
 
@@ -298,27 +324,10 @@ class JointNavigationLoss(nn.Module):
         fwd_current = _extract_tensor(batch, "fwd_current")
         fwd_target = _extract_tensor(batch, "fwd_target")
         fwd_distance = _extract_tensor(batch, "fwd_distance")
-        if fwd_distance is None:
-            if isinstance(batch, dict) and "fwd_distance" in batch:
-                fwd_distance = batch["fwd_distance"]
-            elif hasattr(batch, "fwd_distance"):
-                fwd_distance = getattr(batch, "fwd_distance")
-
         rot_current = _extract_tensor(batch, "rot_current")
         rot_target = _extract_tensor(batch, "rot_target")
         rot_sin_cos = _extract_tensor(batch, "rot_sin_cos")
-        if rot_sin_cos is None:
-            if isinstance(batch, dict) and "rot_sin_cos" in batch:
-                rot_sin_cos = batch["rot_sin_cos"]
-            elif hasattr(batch, "rot_sin_cos"):
-                rot_sin_cos = getattr(batch, "rot_sin_cos")
-
         rot_angle_deg = _extract_tensor(batch, "rot_angle_deg")
-        if rot_angle_deg is None:
-            if isinstance(batch, dict) and "rot_angle_deg" in batch:
-                rot_angle_deg = batch["rot_angle_deg"]
-            elif hasattr(batch, "rot_angle_deg"):
-                rot_angle_deg = getattr(batch, "rot_angle_deg")
 
         # Forward dynamics execution
         pred_fwd = None
