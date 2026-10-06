@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceVideoDataset,
     dual_source_collate_fn,
