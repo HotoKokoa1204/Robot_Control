@@ -15,6 +15,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from agilab_lib.utils.storage import resolve_project_path
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -638,29 +640,15 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
 
     @staticmethod
     def _resolve_dir(path: Union[str, Path]) -> Path:
-        """Resolve directory path against working directory and repo roots.
+        """Resolve directory path canonically to the project repository.
 
         Args:
             path: Path string or Path object to resolve.
 
         Returns:
-            Resolved existing Path object if found, else original Path.
+            Canonical absolute Path anchored to the project root.
         """
-        p = Path(path)
-        if p.exists():
-            return p.resolve()
-        candidates = [
-            Path.cwd() / p,
-            Path("Visual_Navigation_System") / p,
-            Path.cwd().parent.parent / p,
-            Path.cwd().parent.parent / "Visual_Navigation_System" / p,
-            Path.cwd().parent / p,
-            Path.cwd().parent / "Visual_Navigation_System" / p,
-        ]
-        for c in candidates:
-            if c.exists():
-                return c.resolve()
-        return p
+        return resolve_project_path(path)
 
     @staticmethod
     def _find_video_files(
