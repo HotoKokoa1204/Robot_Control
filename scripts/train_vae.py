@@ -13,10 +13,11 @@ import cv2
 import hydra
 import numpy as np
 import torch
-from agilab_lib.models.vae import VAE, vae_loss
-from agilab_lib.utils.storage import resolve_project_path
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
+
+from agilab_lib.models.vae import VAE, vae_loss
+from agilab_lib.utils.storage import resolve_project_path
 
 
 def _extract_video_frames(args: Tuple[str, int, int, int]) -> np.ndarray:

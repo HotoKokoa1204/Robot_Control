@@ -11,6 +11,8 @@ from pathlib import Path
 
 import hydra
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
@@ -18,7 +20,6 @@ from agilab_lib.datasets.video_dataset import (
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.storage import resolve_project_path
-from omegaconf import DictConfig, OmegaConf
 
 
 def extract_keyframes(cfg: DictConfig) -> Path:
