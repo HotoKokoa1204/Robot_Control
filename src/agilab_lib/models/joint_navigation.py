@@ -128,18 +128,21 @@ class JointNavigationModel(nn.Module):
         return self.vae.get_latent(x)
 
     def forward_reconstruction(
-        self, x_t: torch.Tensor
+        self, x_t: torch.Tensor, deterministic: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Branch 1: Frame reconstruction and latent distribution inference.
 
         Args:
             x_t: Input frame tensor of shape (B, 3, 108, 192).
+            deterministic: If True, bypass reparameterization sampling and decode
+                directly from mean vector mu (standard Autoencoder mode). Defaults
+                to False.
 
         Returns:
             Tuple of (recon_x, mu, logvar) where recon_x is (B, 3, 108, 192),
             and mu, logvar are (B, latent_dim).
         """
-        return self.vae(x_t)
+        return self.vae(x_t, deterministic=deterministic)
 
     def forward_translation(
         self,

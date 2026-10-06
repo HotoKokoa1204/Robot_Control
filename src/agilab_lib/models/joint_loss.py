@@ -312,7 +312,9 @@ class JointNavigationLoss(nn.Module):
             if recon_frame is None:
                 raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
 
-            recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
+            recon_x, mu_t, logvar_t = model.forward_reconstruction(
+                recon_frame, deterministic=(self.beta_kl == 0.0)
+            )
             return self.forward(
                 recon_x=recon_x,
                 x_t=recon_frame,
@@ -389,7 +391,9 @@ class JointNavigationLoss(nn.Module):
         if recon_frame is None:
             raise KeyError("Batch must contain 'recon_frame' or 'x_t'.")
 
-        recon_x, mu_t, logvar_t = model.forward_reconstruction(recon_frame)
+        recon_x, mu_t, logvar_t = model.forward_reconstruction(
+            recon_frame, deterministic=(self.beta_kl == 0.0)
+        )
 
         return self.forward(
             recon_x=recon_x,

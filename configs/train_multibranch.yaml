@@ -37,7 +37,7 @@ warmup_vae_epochs: 50 # Backwards compatibility alias for stage1_epochs
 
 # Multi-branch loss weights
 alpha_perc: 0.5
-beta_kl: 0.0001
+beta_kl: 0.0 # 0.0 for pure deterministic Autoencoder mode (no Gaussian KL penalty)
 w_fwd: 1.0
 w_rot: 1.0
 w_recon: 1.0

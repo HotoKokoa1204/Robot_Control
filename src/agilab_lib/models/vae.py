@@ -139,17 +139,20 @@ class VAE(nn.Module):
         return recon_x
 
     def forward(
-        self, x: torch.Tensor
+        self, x: torch.Tensor, deterministic: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Forward pass through VAE.
+        """Forward pass through VAE or deterministic Autoencoder.
 
         Args:
             x: Input frame tensor of shape (B, 3, 108, 192).
+            deterministic: If True, bypass reparameterization sampling and decode
+                directly from mean vector mu (standard Autoencoder mode). Defaults
+                to False.
 
         Returns:
             Tuple of (reconstructed_frame, mu, logvar).
         """
         mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
+        z = mu if deterministic else self.reparameterize(mu, logvar)
         recon_x = self.decode(z)
         return recon_x, mu, logvar
