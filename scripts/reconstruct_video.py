@@ -12,10 +12,12 @@ import cv2
 import hydra
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.models.vae import VAE
-from agilab_lib.utils.storage import resolve_project_path
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
+from omegaconf import DictConfig, OmegaConf
 
 
 def build_side_by_side_frame(
@@ -114,7 +116,7 @@ def reconstruct_video(cfg: DictConfig) -> Tuple[Path, Path]:
     out_w = width * scale * 2
     out_h = height * scale
 
-    output_video_path = resolve_project_path(str(cfg.output_video))
+    output_video_path = ensure_writable_output_path(str(cfg.output_video))
     output_video_path.parent.mkdir(parents=True, exist_ok=True)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -122,7 +124,7 @@ def reconstruct_video(cfg: DictConfig) -> Tuple[Path, Path]:
         str(output_video_path), fourcc, int(cfg.fps), (out_w, out_h)
     )
 
-    sample_dir = resolve_project_path(str(cfg.sample_frames_dir))
+    sample_dir = ensure_writable_output_path(str(cfg.sample_frames_dir))
     sample_dir.mkdir(parents=True, exist_ok=True)
 
     sample_frame_indices = {

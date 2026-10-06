@@ -13,11 +13,13 @@ import cv2
 import hydra
 import numpy as np
 import torch
+from agilab_lib.models.vae import VAE, vae_loss
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
-
-from agilab_lib.models.vae import VAE, vae_loss
-from agilab_lib.utils.storage import resolve_project_path
 
 
 def _extract_video_frames(args: Tuple[str, int, int, int]) -> np.ndarray:
@@ -259,7 +261,7 @@ def main(cfg: DictConfig) -> None:
             )
 
     # Save trained checkpoint
-    out_path = resolve_project_path(str(cfg.output_checkpoint))
+    out_path = ensure_writable_output_path(str(cfg.output_checkpoint))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), out_path)
     print(f"VAE checkpoint successfully saved to: {out_path}")

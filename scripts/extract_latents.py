@@ -12,10 +12,12 @@ from typing import Dict, List, Union
 import cv2
 import hydra
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.models.vae import VAE
-from agilab_lib.utils.storage import resolve_project_path
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
+from omegaconf import DictConfig, OmegaConf
 
 
 def extract_video_latents(
@@ -122,7 +124,7 @@ def extract_latents(cfg: DictConfig) -> Path:
     print(f"Loaded VAE checkpoint from: {vae_ckpt}")
 
     root = resolve_project_path(str(cfg.data_root))
-    out_root = resolve_project_path(str(cfg.output_dir))
+    out_root = ensure_writable_output_path(str(cfg.output_dir))
     out_root.mkdir(parents=True, exist_ok=True)
     video_exts = {".mp4", ".avi", ".mov", ".mkv"}
 

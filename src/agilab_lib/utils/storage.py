@@ -72,6 +72,22 @@ def resolve_project_path(path: Union[str, Path]) -> Path:
     return (get_project_root() / clean_path).resolve()
 
 
+def _get_project_subdir(
+    base_name: str, subdir: Optional[Union[str, Path]] = None
+) -> Path:
+    """Get canonical project subdirectory, optionally resolving an inner subdirectory.
+
+    Args:
+        base_name: Base directory name relative to project root.
+        subdir: Optional subdirectory path or name inside base directory.
+
+    Returns:
+        Canonical absolute Path to target directory or subdirectory.
+    """
+    base = resolve_project_path(base_name)
+    return (base / subdir).resolve() if subdir else base
+
+
 def get_outputs_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     """Get the canonical outputs directory or a subdirectory within it.
 
@@ -81,8 +97,7 @@ def get_outputs_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     Returns:
         Absolute Path to the canonical outputs directory or subdirectory.
     """
-    base = resolve_project_path("outputs")
-    return (base / subdir).resolve() if subdir else base
+    return _get_project_subdir("outputs", subdir)
 
 
 def get_checkpoints_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
@@ -94,8 +109,7 @@ def get_checkpoints_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     Returns:
         Absolute Path to the canonical checkpoints directory or subdirectory.
     """
-    base = resolve_project_path("checkpoints")
-    return (base / subdir).resolve() if subdir else base
+    return _get_project_subdir("checkpoints", subdir)
 
 
 def get_data_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
@@ -107,8 +121,7 @@ def get_data_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     Returns:
         Absolute Path to the canonical data directory or subdirectory.
     """
-    base = resolve_project_path("data")
-    return (base / subdir).resolve() if subdir else base
+    return _get_project_subdir("data", subdir)
 
 
 def get_cache_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
@@ -120,5 +133,26 @@ def get_cache_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     Returns:
         Absolute Path to the canonical cache directory or subdirectory.
     """
-    base = resolve_project_path(".cache")
-    return (base / subdir).resolve() if subdir else base
+    return _get_project_subdir(".cache", subdir)
+
+
+def ensure_writable_output_path(path: Union[str, Path]) -> Path:
+    """Resolve output path and enforce that it does not reside within data/.
+
+    Args:
+        path: Path string or Path object representing target output location.
+
+    Returns:
+        Canonical absolute Path guaranteed to reside outside data/.
+
+    Raises:
+        PermissionError: If the resolved path points into the read-only data/ directory.
+    """
+    resolved = resolve_project_path(path)
+    data_dir = get_data_dir()
+    if resolved == data_dir or resolved.is_relative_to(data_dir):
+        raise PermissionError(
+            "Storage boundary violation: data/ is strictly read-only "
+            "for ground-truth assets. Output path must target outputs/ or .cache/."
+        )
+    return resolved

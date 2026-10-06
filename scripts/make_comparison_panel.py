@@ -11,13 +11,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceVideoDataset,
     dual_source_collate_fn,
 )
 from agilab_lib.models.joint_navigation import JointNavigationModel
-from agilab_lib.utils.storage import resolve_project_path
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 
 
 def main() -> None:
@@ -146,7 +148,9 @@ def main() -> None:
         axes[i, 6].axis("off")
 
     plt.tight_layout()
-    out_file = resolve_project_path("outputs/eval/three_stage_ae_comparison_panel.png")
+    out_file = ensure_writable_output_path(
+        "outputs/eval/three_stage_ae_comparison_panel.png"
+    )
     out_file.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(str(out_file), dpi=150, bbox_inches="tight")
     plt.close()
