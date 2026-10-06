@@ -25,6 +25,8 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
+from tqdm import tqdm  # noqa: E402
+
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -37,7 +39,6 @@ from agilab_lib.utils.storage import (  # noqa: E402
     ensure_writable_output_path,
     resolve_project_path,
 )
-from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:

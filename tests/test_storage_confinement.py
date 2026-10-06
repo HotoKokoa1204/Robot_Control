@@ -20,6 +20,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
@@ -30,8 +32,6 @@ from agilab_lib.utils.storage import (
     get_project_root,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
-
 from scripts.extract_keyframes import extract_keyframes
 from scripts.generate_video import generate_video
 from scripts.reconstruct_video import reconstruct_video
@@ -160,12 +160,12 @@ def test_storage_confinement_data_directory_untouched(
 
         out_kf = extract_keyframes(cfg_kf)
         assert out_kf.is_file(), f"Expected keyframes output file at {out_kf}"
-        assert _is_relative_to(
-            out_kf, outputs_dir
-        ), f"{out_kf} not inside {outputs_dir}"
-        assert not _is_relative_to(
-            out_kf, baseline_data_dir
-        ), f"{out_kf} leaked into data/"
+        assert _is_relative_to(out_kf, outputs_dir), (
+            f"{out_kf} not inside {outputs_dir}"
+        )
+        assert not _is_relative_to(out_kf, baseline_data_dir), (
+            f"{out_kf} leaked into data/"
+        )
 
         # 2. generate_video execution
         cfg_gen = OmegaConf.load(root / "configs" / "generate_video.yaml")
@@ -180,12 +180,12 @@ def test_storage_confinement_data_directory_untouched(
         out_gen_str = generate_video(cfg_gen)
         out_gen = Path(out_gen_str)
         assert out_gen.is_file(), f"Expected generated video file at {out_gen}"
-        assert _is_relative_to(
-            out_gen, outputs_dir
-        ), f"{out_gen} not inside {outputs_dir}"
-        assert not _is_relative_to(
-            out_gen, baseline_data_dir
-        ), f"{out_gen} leaked into data/"
+        assert _is_relative_to(out_gen, outputs_dir), (
+            f"{out_gen} not inside {outputs_dir}"
+        )
+        assert not _is_relative_to(out_gen, baseline_data_dir), (
+            f"{out_gen} leaked into data/"
+        )
 
         # 3. reconstruct_video execution
         cfg_recon = OmegaConf.load(root / "configs" / "reconstruct_video.yaml")
@@ -481,17 +481,15 @@ def test_outer_workspace_root_contains_no_leaked_directories() -> None:
     if not outer_workspace.is_dir():
         pytest.skip(f"Outer workspace root {outer_workspace} not accessible.")
 
-    assert not (
-        outer_workspace / "outputs"
-    ).exists(), f"Leaked outputs in outer workspace: {outer_workspace / 'outputs'}"
-    assert not (
-        outer_workspace / "checkpoints"
-    ).exists(), (
+    assert not (outer_workspace / "outputs").exists(), (
+        f"Leaked outputs in outer workspace: {outer_workspace / 'outputs'}"
+    )
+    assert not (outer_workspace / "checkpoints").exists(), (
         f"Leaked checkpoints in outer workspace: {outer_workspace / 'checkpoints'}"
     )
-    assert not (
-        outer_workspace / "data"
-    ).exists(), f"Leaked data in outer workspace: {outer_workspace / 'data'}"
+    assert not (outer_workspace / "data").exists(), (
+        f"Leaked data in outer workspace: {outer_workspace / 'data'}"
+    )
 
 
 def test_all_default_configs_produce_no_outputs_in_data() -> None:
@@ -501,9 +499,9 @@ def test_all_default_configs_produce_no_outputs_in_data() -> None:
     root = get_project_root()
     config_dir = root / "configs"
     yaml_files = sorted(config_dir.glob("*.yaml"))
-    assert (
-        len(yaml_files) >= 10
-    ), f"Expected at least 10 config files, found {len(yaml_files)}"
+    assert len(yaml_files) >= 10, (
+        f"Expected at least 10 config files, found {len(yaml_files)}"
+    )
 
     data_dir = get_data_dir()
     outputs_dir = get_outputs_dir()
@@ -522,25 +520,25 @@ def test_all_default_configs_produce_no_outputs_in_data() -> None:
         for key in output_keys:
             if key in cfg and cfg[key] is not None:
                 val = str(cfg[key])
-                assert not val.startswith(
-                    "data/"
-                ), f"{yf.name} key '{key}' starts with data/: {val}"
+                assert not val.startswith("data/"), (
+                    f"{yf.name} key '{key}' starts with data/: {val}"
+                )
                 resolved = resolve_project_path(val)
                 assert _is_relative_to(resolved, outputs_dir), (
                     f"{yf.name} key '{key}' resolved to {resolved}, "
                     "expected under outputs/"
                 )
-                assert not _is_relative_to(
-                    resolved, data_dir
-                ), f"{yf.name} key '{key}' resolved inside data/: {resolved}"
+                assert not _is_relative_to(resolved, data_dir), (
+                    f"{yf.name} key '{key}' resolved inside data/: {resolved}"
+                )
 
         # Check cache keys
         for key in cache_keys:
             if key in cfg and cfg[key] is not None:
                 val = str(cfg[key])
-                assert not val.startswith(
-                    "data/"
-                ), f"{yf.name} cache key '{key}' starts with data/: {val}"
+                assert not val.startswith("data/"), (
+                    f"{yf.name} cache key '{key}' starts with data/: {val}"
+                )
                 resolved = resolve_project_path(val)
                 assert _is_relative_to(resolved, cache_dir) or _is_relative_to(
                     resolved, outputs_dir
@@ -548,17 +546,17 @@ def test_all_default_configs_produce_no_outputs_in_data() -> None:
                     f"{yf.name} cache key '{key}' resolved to {resolved}, "
                     "expected under .cache/ or outputs/"
                 )
-                assert not _is_relative_to(
-                    resolved, data_dir
-                ), f"{yf.name} cache key '{key}' resolved inside data/: {resolved}"
+                assert not _is_relative_to(resolved, data_dir), (
+                    f"{yf.name} cache key '{key}' resolved inside data/: {resolved}"
+                )
 
         # Check checkpoint keys
         for key in checkpoint_keys:
             if key in cfg and cfg[key] is not None:
                 val = str(cfg[key])
-                assert not val.startswith(
-                    "data/"
-                ), f"{yf.name} checkpoint key '{key}' starts with data/: {val}"
+                assert not val.startswith("data/"), (
+                    f"{yf.name} checkpoint key '{key}' starts with data/: {val}"
+                )
                 resolved = resolve_project_path(val)
                 assert _is_relative_to(resolved, checkpoints_dir), (
                     f"{yf.name} checkpoint key '{key}' resolved to {resolved}, "
@@ -572,9 +570,9 @@ def test_all_default_configs_produce_no_outputs_in_data() -> None:
         # Check output_dir
         if "output_dir" in cfg and cfg["output_dir"] is not None:
             val = str(cfg["output_dir"])
-            assert not val.startswith(
-                "data/"
-            ), f"{yf.name} output_dir starts with data/: {val}"
+            assert not val.startswith("data/"), (
+                f"{yf.name} output_dir starts with data/: {val}"
+            )
             resolved = resolve_project_path(val)
             assert _is_relative_to(resolved, outputs_dir) or _is_relative_to(
                 resolved, checkpoints_dir
@@ -582,9 +580,9 @@ def test_all_default_configs_produce_no_outputs_in_data() -> None:
                 f"{yf.name} output_dir resolved to {resolved}, "
                 "expected under outputs/ or checkpoints/"
             )
-            assert not _is_relative_to(
-                resolved, data_dir
-            ), f"{yf.name} output_dir resolved inside data/: {resolved}"
+            assert not _is_relative_to(resolved, data_dir), (
+                f"{yf.name} output_dir resolved inside data/: {resolved}"
+            )
 
 
 def test_git_status_cleanliness_no_artifact_clutter() -> None:
@@ -612,9 +610,9 @@ def test_git_status_cleanliness_no_artifact_clutter() -> None:
             elif any(path_str.endswith(ext) for ext in artifact_extensions):
                 untracked_clutter.append(path_str)
 
-    assert (
-        not untracked_clutter
-    ), f"Untracked artifact clutter in git status: {untracked_clutter}"
+    assert not untracked_clutter, (
+        f"Untracked artifact clutter in git status: {untracked_clutter}"
+    )
 
 
 def test_main_repo_git_status_cleanliness() -> None:
@@ -631,9 +629,9 @@ def test_main_repo_git_status_cleanliness() -> None:
         check=True,
     )
     status_output = proc.stdout.strip()
-    assert (
-        not status_output
-    ), f"Git status in main repo is not strictly empty:\n{status_output}"
+    assert not status_output, (
+        f"Git status in main repo is not strictly empty:\n{status_output}"
+    )
 
 
 def test_gitignore_guards_outputs_and_checkpoints_from_clutter() -> None:

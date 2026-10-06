@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 from PIL import Image  # isort: skip # noqa: F401
 import pytest
 import torch
+
 from agilab_lib.models import (
     JointLossOutput,
     JointNavigationLoss,

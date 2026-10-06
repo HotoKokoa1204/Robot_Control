@@ -12,6 +12,7 @@ from typing import Any, Dict
 from PIL import Image  # isort: skip # noqa: F401
 import pytest
 import torch
+
 from agilab_lib.models import (
     JointLossOutput,
     JointNavigationLoss,
@@ -515,9 +516,9 @@ def test_stage2_gradient_isolation() -> None:
 
     # VAE parameters must receive NO gradients
     for name, param in model.vae.named_parameters():
-        assert (
-            param.grad is None
-        ), f"VAE parameter {name} received unexpected gradient in stage 2"
+        assert param.grad is None, (
+            f"VAE parameter {name} received unexpected gradient in stage 2"
+        )
 
 
 def test_stage3_gradient_isolation() -> None:
@@ -547,10 +548,10 @@ def test_stage3_gradient_isolation() -> None:
 
     # Frozen transformers receive NO gradients
     for name, param in model.forward_transformer.named_parameters():
-        assert (
-            param.grad is None
-        ), f"forward_transformer {name} received grad in stage 3"
+        assert param.grad is None, (
+            f"forward_transformer {name} received grad in stage 3"
+        )
     for name, param in model.rotation_transformer.named_parameters():
-        assert (
-            param.grad is None
-        ), f"rotation_transformer {name} received grad in stage 3"
+        assert param.grad is None, (
+            f"rotation_transformer {name} received grad in stage 3"
+        )

@@ -20,6 +20,8 @@ from typing import Dict
 from PIL import Image  # isort: skip # noqa: F401
 
 import torch
+from omegaconf import OmegaConf
+
 from agilab_lib.datasets.dual_source_dataset import DummyDualSourceVideoDataset
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.rlt import (
@@ -27,8 +29,6 @@ from agilab_lib.models.rlt import (
     ExecutionOrder,
 )
 from agilab_lib.models.vae import VAE
-from omegaconf import OmegaConf
-
 from scripts.generate_video import generate_video
 from scripts.train_multibranch import train_multibranch
 

@@ -12,12 +12,13 @@ from typing import Dict, List, Union
 import cv2
 import hydra
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
 
 
 def extract_video_latents(

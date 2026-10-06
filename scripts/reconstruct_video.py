@@ -12,12 +12,13 @@ import cv2
 import hydra
 import numpy as np
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
 
 
 def build_side_by_side_frame(
