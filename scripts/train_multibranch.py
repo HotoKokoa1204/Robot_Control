@@ -25,8 +25,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -35,6 +33,7 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -302,11 +301,11 @@ def train_multibranch(
       transformers frozen. Sanity gate validated at stage 1 boundary,
       saving stage1_vae.pt.
     - Stage 2 (Transformer Dynamics Optimization): model.vae frozen;
-      transformers trained at lr with w_latent=1.0. Saves stage2_transformers.pt
+      transformers trained at lr_trans with w_latent=1.0. Saves stage2_transformers.pt
       at stage 2 boundary.
     - Stage 3 (Autoencoder Manifold Refinement): transformers frozen;
-      model.vae fine-tuned at lr_vae_stage3. Final checkpoints and loss curves
-      exported at completion.
+      model.vae fine-tuned at lr_vae_stage3 with w_latent=0.0. Final checkpoints
+      and loss curves exported at completion.
 
     Args:
         cfg: Configuration parameters dictionary.
@@ -403,6 +402,7 @@ def train_multibranch(
 
     # 5. Optimizer and curriculum hyperparameters
     lr = float(cfg.get("lr", 1e-4))
+    lr_trans = float(cfg.get("lr_trans", cfg.get("lr", 1e-4)))
     lr_vae_stage1 = float(cfg.get("lr_vae_stage1", lr))
     lr_vae_stage3 = float(cfg.get("lr_vae_stage3", cfg.get("lr_vae", 1e-5)))
 
@@ -454,33 +454,24 @@ def train_multibranch(
             model.vae.requires_grad_(True)
             model.forward_transformer.requires_grad_(False)
             model.rotation_transformer.requires_grad_(False)
-            trainable_params = [p for p in model.vae.parameters() if p.requires_grad]
-            stage_opt = torch.optim.Adam(trainable_params, lr=lr_vae_stage1)
+            stage_lr = lr_vae_stage1
             desc = "Stage 1 (Autoencoder Warm-up)"
-            print(
-                f"\n=== Entering Stage 1: Autoencoder Warm-up (LR: {lr_vae_stage1}) ==="
-            )
         elif stage_num == 2:
             model.vae.requires_grad_(False)
             model.forward_transformer.requires_grad_(True)
             model.rotation_transformer.requires_grad_(True)
-            trainable_params = [
-                p for p in model.forward_transformer.parameters() if p.requires_grad
-            ] + [p for p in model.rotation_transformer.parameters() if p.requires_grad]
-            stage_opt = torch.optim.Adam(trainable_params, lr=lr)
+            stage_lr = lr_trans
             desc = "Stage 2 (Transformer Dynamics)"
-            print(f"\n=== Entering Stage 2: Transformer Dynamics (LR: {lr}) ===")
         else:  # stage_num == 3
             model.vae.requires_grad_(True)
             model.forward_transformer.requires_grad_(False)
             model.rotation_transformer.requires_grad_(False)
-            trainable_params = [p for p in model.vae.parameters() if p.requires_grad]
-            stage_opt = torch.optim.Adam(trainable_params, lr=lr_vae_stage3)
+            stage_lr = lr_vae_stage3
             desc = "Stage 3 (Autoencoder Refinement)"
-            print(
-                f"\n=== Entering Stage 3: Autoencoder Refinement "
-                f"(LR: {lr_vae_stage3}) ==="
-            )
+
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        stage_opt = torch.optim.Adam(trainable_params, lr=stage_lr)
+        print(f"\n=== Entering {desc} (LR: {stage_lr}) ===")
         return stage_opt, desc
 
     active_stage: int = get_stage_for_epoch(0)
@@ -541,7 +532,7 @@ def train_multibranch(
                     w_latent_max - w_latent_min
                 )
         else:
-            current_w_latent = 0.0 if current_stage == 1 else target_w_latent
+            current_w_latent = target_w_latent if current_stage == 2 else 0.0
 
         loss_fn.w_latent = current_w_latent
 

@@ -11,23 +11,25 @@ Description: Integration and unit tests for joint multi-branch training script,
 
 import math
 from pathlib import Path
+from typing import Any
 
 # Windows DLL initialization guard for PIL/torchvision
 from PIL import Image  # isort: skip # noqa: F401
 
 import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
+from agilab_lib.models.joint_loss import JointNavigationLoss
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.rlt import (
     ForwardLatentTransformer,
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+from omegaconf import DictConfig, OmegaConf
+
 from scripts.train_multibranch import (
     get_dataset,
     plot_loss_curves,
@@ -59,6 +61,7 @@ def test_config_loading() -> None:
 
     # Optimization parameters
     assert float(cfg.lr) == 1e-4
+    assert float(cfg.lr_trans) == 1e-4
     assert float(cfg.lr_vae_stage1) == 1e-4
     assert float(cfg.lr_vae_stage3) == 1e-5
     assert float(cfg.lr_vae) == 1e-5
@@ -503,3 +506,77 @@ def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None
     assert (
         trained_model.rotation_transformer.blocks[0].fc1.weight.requires_grad is False
     )
+
+
+def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
+    """Verify that current_w_latent is set to 0.0 in Stage 1, 1.0 in Stage 2,
+    and 0.0 in Stage 3.
+    """
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=4,
+        img_height=108,
+        img_width=192,
+        seed=42,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+
+    out_dir = tmp_path / "w_latent_test_out"
+    cfg = OmegaConf.create(
+        {
+            "latent_dim": 64,
+            "hidden_dim": 32,
+            "num_blocks": 2,
+            "block_inner_dim": 32,
+            "lr": 1e-4,
+            "lr_trans": 1e-4,
+            "lr_vae_stage1": 1e-4,
+            "lr_vae_stage3": 1e-5,
+            "batch_size": 2,
+            "gradient_accumulation_steps": 1,
+            "use_amp": False,
+            "max_epochs": 3,
+            "stage1_epochs": 1,
+            "stage2_epochs": 1,
+            "stage3_epochs": 1,
+            "w_latent": 1.0,
+            "sanity_check_min_std": 0.1,
+            "alpha_perc": 0.5,
+            "beta_kl": 0.0001,
+            "w_fwd": 1.0,
+            "w_rot": 1.0,
+            "w_recon": 1.0,
+            "output_dir": str(out_dir),
+            "save_interval_epochs": 1,
+            "vae_checkpoint": None,
+            "device": "cpu",
+        }
+    )
+
+    observed_w_latents = []
+    loss_fn = JointNavigationLoss()
+    original_forward = loss_fn.forward_model
+
+    def tracking_forward(*args: Any, **kwargs: Any) -> Any:
+        observed_w_latents.append(loss_fn.w_latent)
+        return original_forward(*args, **kwargs)
+
+    loss_fn.forward_model = tracking_forward  # type: ignore[assignment]
+
+    train_multibranch(cfg, dataset=dataset, model=model, loss_fn=loss_fn)
+
+    # 4 samples / batch_size 2 = 2 batches per epoch (epochs: 0, 1, 2)
+    assert len(observed_w_latents) == 6
+    # Stage 1: w_latent = 0.0
+    assert observed_w_latents[0] == 0.0
+    assert observed_w_latents[1] == 0.0
+    # Stage 2: w_latent = 1.0
+    assert observed_w_latents[2] == 1.0
+    assert observed_w_latents[3] == 1.0
+    # Stage 3: w_latent = 0.0
+    assert observed_w_latents[4] == 0.0
+    assert observed_w_latents[5] == 0.0
