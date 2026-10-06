@@ -6,7 +6,6 @@ Date: 2026-09-07
 Description: Train Residual Latent Transformer with 3D Motion Command condition.
 """
 
-import os
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -14,9 +13,6 @@ import hydra
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset
-
 from agilab_lib.datasets.latent_dataset import (
     CachedLatentDataset,
     DummyLatentPairDataset,
@@ -27,6 +23,9 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
+from agilab_lib.utils.storage import resolve_project_path
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader, Dataset
 
 
 def get_dataset(
@@ -45,7 +44,11 @@ def get_dataset(
             are available in the specified directory.
     """
     data_dir_str = str(cfg.get("data_dir", "")).strip()
-    data_path: Path = Path(data_dir_str) if data_dir_str else Path(".")
+    data_path: Path = (
+        resolve_project_path(data_dir_str)
+        if data_dir_str
+        else resolve_project_path(".")
+    )
     if data_dir_str and data_path.exists():
         mode = str(cfg.mode).lower()
         return_sin_cos = bool(cfg.get("return_sin_cos", mode == "rotation"))
@@ -118,16 +121,18 @@ def run_validation_inference(
     print(f"Validation inference output Latent Vector shape: {pred_latent.shape}")
 
     # Optional VAE decoding validation if checkpoint provided
-    if cfg.vae_checkpoint and os.path.exists(str(cfg.vae_checkpoint)):
-        vae = VAE(latent_dim=latent_dim).to(device)
-        vae_state = torch.load(
-            str(cfg.vae_checkpoint), map_location=device, weights_only=True
-        )
-        vae.load_state_dict(vae_state)
-        vae.eval()
-        with torch.no_grad():
-            recon_frames = vae.decode(pred_latent)
-        print(f"Reconstructed frames from predicted latents: {recon_frames.shape}")
+    if cfg.get("vae_checkpoint") and str(cfg.vae_checkpoint).strip():
+        vae_ckpt_path = resolve_project_path(str(cfg.vae_checkpoint))
+        if vae_ckpt_path.exists():
+            vae = VAE(latent_dim=latent_dim).to(device)
+            vae_state = torch.load(
+                vae_ckpt_path, map_location=device, weights_only=True
+            )
+            vae.load_state_dict(vae_state)
+            vae.eval()
+            with torch.no_grad():
+                recon_frames = vae.decode(pred_latent)
+            print(f"Reconstructed frames from predicted latents: {recon_frames.shape}")
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="train_rlt")
@@ -185,24 +190,31 @@ def main(cfg: DictConfig) -> None:
     use_img_loss = bool(cfg.get("use_image_loss", False))
     img_loss_weight = float(cfg.get("image_loss_weight", 1.0))
     vae: Optional[VAE] = None
-    vae_ckpt = cfg.get("vae_checkpoint", "")
+    vae_ckpt_str = cfg.get("vae_checkpoint", "")
     if use_img_loss:
-        if vae_ckpt and os.path.exists(str(vae_ckpt)):
-            vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
-            vae.load_state_dict(
-                torch.load(str(vae_ckpt), map_location=device, weights_only=True)
-            )
-            vae.eval()
-            for param in vae.parameters():
-                param.requires_grad = False
-            print(
-                f"Loaded frozen VAE decoder from: {vae_ckpt} "
-                f"(loss weight: {img_loss_weight})"
-            )
+        if vae_ckpt_str and str(vae_ckpt_str).strip():
+            vae_ckpt_path = resolve_project_path(str(vae_ckpt_str))
+            if vae_ckpt_path.exists():
+                vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
+                vae.load_state_dict(
+                    torch.load(vae_ckpt_path, map_location=device, weights_only=True)
+                )
+                vae.eval()
+                for param in vae.parameters():
+                    param.requires_grad = False
+                print(
+                    f"Loaded frozen VAE decoder from: {vae_ckpt_path} "
+                    f"(loss weight: {img_loss_weight})"
+                )
+            else:
+                print(
+                    f"Warning: use_image_loss is True but vae_checkpoint not found at: "
+                    f"{vae_ckpt_path}. Falling back to pure latent MSE."
+                )
         else:
             print(
-                f"Warning: use_image_loss is True but vae_checkpoint not found at: "
-                f"{vae_ckpt}. Falling back to pure latent MSE."
+                "Warning: use_image_loss is True but vae_checkpoint is empty. "
+                "Falling back to pure latent MSE."
             )
 
     print(f"Starting training in [{mode}] mode on device: {device}...")
@@ -275,7 +287,7 @@ def main(cfg: DictConfig) -> None:
     run_validation_inference(model, cfg, device)
 
     # Save trained checkpoint
-    output_path = Path(str(cfg.output_checkpoint))
+    output_path = resolve_project_path(str(cfg.output_checkpoint))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), output_path)
     print(f"Model checkpoint successfully saved to: {output_path}")

@@ -7,10 +7,9 @@ Description: Reconstructs and interpolates video from Keyframes and Latent Vecto
 """
 
 import json
-import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 # Windows DLL initialization guard for PIL/torchvision
 from PIL import Image  # isort: skip # noqa: F401
@@ -39,10 +38,11 @@ from agilab_lib.models.vae import VAE  # noqa: E402
 from agilab_lib.utils.interpolation import (  # noqa: E402
     linear_interpolate_latent_sequence,
 )
+from agilab_lib.utils.storage import resolve_project_path  # noqa: E402
 
 
 def render_frames_to_video(
-    frames: List[np.ndarray], output_video_path: str, fps: int = 30
+    frames: List[np.ndarray], output_video_path: Union[str, Path], fps: int = 30
 ) -> None:
     """Writes a sequence of RGB/BGR numpy frames to an MP4 video file.
 
@@ -54,13 +54,12 @@ def render_frames_to_video(
     if not frames:
         return
 
-    output_dir = os.path.dirname(output_video_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+    out_path = Path(output_video_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     height, width, _ = frames[0].shape
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
 
     for frame in frames:
         writer.write(frame)
@@ -84,58 +83,60 @@ def generate_video(cfg: DictConfig) -> str:
     # 1. Initialize VAE
     latent_dim = int(cfg.latent_dim)
     vae = VAE(latent_dim=latent_dim).to(device)
-    if cfg.vae_checkpoint and os.path.exists(str(cfg.vae_checkpoint)):
-        ckpt = torch.load(
-            str(cfg.vae_checkpoint), map_location=device, weights_only=True
-        )
-        if isinstance(ckpt, dict):
-            for candidate_key in (
-                "state_dict",
-                "model_state_dict",
-                "vae_state_dict",
-                "vae",
-            ):
-                if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
-                    ckpt = ckpt[candidate_key]
-                    break
-            cleaned_sd = {}
-            vae_keys = set(vae.state_dict().keys())
-            for k, v in ckpt.items():
-                key = k
-                if key.startswith("module."):
-                    key = key[len("module.") :]
-                if key.startswith("vae."):
-                    key = key[len("vae.") :]
-                if key in vae_keys:
-                    cleaned_sd[key] = v
-            vae.load_state_dict(cleaned_sd if cleaned_sd else ckpt)
-        else:
-            vae.load_state_dict(ckpt)
-        print(f"Loaded VAE checkpoint: {cfg.vae_checkpoint}")
+    if cfg.get("vae_checkpoint") and str(cfg.vae_checkpoint).strip():
+        vae_ckpt_path = resolve_project_path(str(cfg.vae_checkpoint))
+        if vae_ckpt_path.exists():
+            ckpt = torch.load(vae_ckpt_path, map_location=device, weights_only=True)
+            if isinstance(ckpt, dict):
+                for candidate_key in (
+                    "state_dict",
+                    "model_state_dict",
+                    "vae_state_dict",
+                    "vae",
+                ):
+                    if candidate_key in ckpt and isinstance(ckpt[candidate_key], dict):
+                        ckpt = ckpt[candidate_key]
+                        break
+                cleaned_sd = {}
+                vae_keys = set(vae.state_dict().keys())
+                for k, v in ckpt.items():
+                    key = k
+                    if key.startswith("module."):
+                        key = key[len("module.") :]
+                    if key.startswith("vae."):
+                        key = key[len("vae.") :]
+                    if key in vae_keys:
+                        cleaned_sd[key] = v
+                vae.load_state_dict(cleaned_sd if cleaned_sd else ckpt)
+            else:
+                vae.load_state_dict(ckpt)
+            print(f"Loaded VAE checkpoint: {vae_ckpt_path}")
     vae.eval()
 
     # 2. Load dataset
-    if os.path.exists(cfg.video_path):
-        dataset = VideoDataset(cfg.video_path)
+    video_path = resolve_project_path(str(cfg.video_path))
+    if video_path.exists():
+        dataset = VideoDataset(video_path)
         print(f"Loaded real video with {len(dataset)} frames.")
     elif cfg.use_dummy_if_missing:
         dataset = DummyVideoDataset(num_frames=30)
         print(f"Video file missing. Using DummyVideoDataset ({len(dataset)} frames).")
     else:
-        raise FileNotFoundError(f"Video file not found at {cfg.video_path}")
+        raise FileNotFoundError(f"Video file not found at {video_path}")
 
     # 3. Load Keyframe indices
     keyframe_indices: List[int] = []
-    if os.path.exists(cfg.keyframes_json):
-        with open(cfg.keyframes_json, "r", encoding="utf-8") as f:
+    kf_path = resolve_project_path(str(cfg.keyframes_json))
+    if kf_path.exists():
+        with open(kf_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             keyframe_indices = data.get("keyframe_indices", [])
-        print(f"Loaded {len(keyframe_indices)} keyframes from {cfg.keyframes_json}")
+        print(f"Loaded {len(keyframe_indices)} keyframes from {kf_path}")
     elif cfg.use_dummy_if_missing:
         keyframe_indices = [0, min(10, len(dataset) - 1), len(dataset) - 1]
         print(f"Keyframe JSON missing. Using default indices: {keyframe_indices}")
     else:
-        raise FileNotFoundError(f"Keyframe JSON not found at: {cfg.keyframes_json}")
+        raise FileNotFoundError(f"Keyframe JSON not found at: {kf_path}")
 
     # Filter valid keyframe indices
     valid_indices = [idx for idx in keyframe_indices if idx < len(dataset)]
@@ -150,8 +151,18 @@ def generate_video(cfg: DictConfig) -> str:
 
     # 4b. Optional compound motion projection via ChainedLatentTransformer
     if cfg.get("use_chained_transformer", False):
-        rot_ckpt = cfg.get("rotation_checkpoint", "") or None
-        fwd_ckpt = cfg.get("forward_checkpoint", "") or None
+        rot_ckpt_cfg = cfg.get("rotation_checkpoint", "")
+        fwd_ckpt_cfg = cfg.get("forward_checkpoint", "")
+        rot_ckpt = (
+            resolve_project_path(str(rot_ckpt_cfg))
+            if rot_ckpt_cfg and str(rot_ckpt_cfg).strip()
+            else None
+        )
+        fwd_ckpt = (
+            resolve_project_path(str(fwd_ckpt_cfg))
+            if fwd_ckpt_cfg and str(fwd_ckpt_cfg).strip()
+            else None
+        )
         execution_order = ExecutionOrder(
             str(cfg.get("execution_order", "rotate_first"))
         )
@@ -177,12 +188,8 @@ def generate_video(cfg: DictConfig) -> str:
             forward_num_blocks=fwd_blocks,
             rotation_num_blocks=rot_blocks,
             block_inner_dim=block_inner_dim,
-            rotation_checkpoint=(
-                rot_ckpt if rot_ckpt and os.path.exists(str(rot_ckpt)) else None
-            ),
-            forward_checkpoint=(
-                fwd_ckpt if fwd_ckpt and os.path.exists(str(fwd_ckpt)) else None
-            ),
+            rotation_checkpoint=(rot_ckpt if rot_ckpt and rot_ckpt.exists() else None),
+            forward_checkpoint=(fwd_ckpt if fwd_ckpt and fwd_ckpt.exists() else None),
         ).to(device)
         chained_model.eval()
 
@@ -219,11 +226,13 @@ def generate_video(cfg: DictConfig) -> str:
     if cfg.use_rrdn:
         factor = int(cfg.rrdn_upscale_factor)
         rrdn = RRDN(upscale_factor=factor).to(device)
-        if cfg.rrdn_checkpoint and os.path.exists(cfg.rrdn_checkpoint):
-            rrdn.load_state_dict(
-                torch.load(cfg.rrdn_checkpoint, map_location=device, weights_only=True)
-            )
-            print(f"Loaded RRDN checkpoint: {cfg.rrdn_checkpoint}")
+        if cfg.get("rrdn_checkpoint") and str(cfg.rrdn_checkpoint).strip():
+            rrdn_ckpt_path = resolve_project_path(str(cfg.rrdn_checkpoint))
+            if rrdn_ckpt_path.exists():
+                rrdn.load_state_dict(
+                    torch.load(rrdn_ckpt_path, map_location=device, weights_only=True)
+                )
+                print(f"Loaded RRDN checkpoint: {rrdn_ckpt_path}")
         rrdn.eval()
 
         with torch.no_grad():
@@ -241,10 +250,10 @@ def generate_video(cfg: DictConfig) -> str:
         output_frames.append(frame_bgr)
 
     # 9. Write MP4 video
-    out_video_str = str(cfg.output_video)
-    render_frames_to_video(output_frames, out_video_str, fps=int(cfg.fps))
-    print(f"Successfully generated video saved to: {out_video_str}")
-    return out_video_str
+    out_video_path = resolve_project_path(str(cfg.output_video))
+    render_frames_to_video(output_frames, out_video_path, fps=int(cfg.fps))
+    print(f"Successfully generated video saved to: {out_video_path}")
+    return str(out_video_path)
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="generate_video")

@@ -17,4 +17,4 @@ img_height: 108
 batch_size: 32
 
 # Output cache directory
-output_dir: "data/latents"
+output_dir: "outputs/latents"

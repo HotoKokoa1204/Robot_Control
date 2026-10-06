@@ -6,5 +6,5 @@ latent_dim: 128
 img_width: 192
 img_height: 108
 fps: 30
-output_video: "data/reconstructed_eval_vae.mp4"
-sample_frames_dir: "data/reconstructed_samples"
+output_video: "outputs/eval/reconstructed_eval_vae.mp4"
+sample_frames_dir: "outputs/samples/reconstructed_samples"

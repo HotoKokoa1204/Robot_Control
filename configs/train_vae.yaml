@@ -11,7 +11,7 @@ max_videos_per_category: null
 frameskip: 15
 img_height: 108
 img_width: 192
-cache_path: "data/vae_dataset_cache_88v.npy"
+cache_path: ".cache/vae_dataset_cache_88v.npy"
 
 # VAE model architecture settings
 latent_dim: 128
