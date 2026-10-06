@@ -25,8 +25,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -35,6 +33,7 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -215,21 +214,39 @@ def plot_loss_curves(
     axes[1, 0].legend()
     axes[1, 0].grid(True, alpha=0.3)
 
-    # Subplot 4: Regularization (KL & Perceptual)
-    axes[1, 1].plot(
+    # Subplot 4: Regularization (Perceptual & optional KL)
+    ax4 = axes[1, 1]
+    p1 = ax4.plot(
         epochs,
         history.get("perc", []),
         label="Perceptual Loss",
         color="tab:purple",
+        linewidth=1.8,
     )
-    axes[1, 1].plot(
-        epochs, history.get("kl", []), label="KL Divergence", color="tab:brown"
-    )
-    axes[1, 1].set_title("Perceptual & KL Regularization")
-    axes[1, 1].set_xlabel("Epoch")
-    axes[1, 1].set_ylabel("Loss")
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
+    ax4.set_xlabel("Epoch")
+    ax4.set_ylabel("Perceptual Loss", color="tab:purple")
+    ax4.tick_params(axis="y", labelcolor="tab:purple")
+    ax4.grid(True, alpha=0.3)
+
+    kl_vals = history.get("kl", [])
+    if any(k > 0.001 for k in kl_vals):
+        ax4_twin = ax4.twinx()
+        p2 = ax4_twin.plot(
+            epochs,
+            kl_vals,
+            label="KL Divergence",
+            color="tab:brown",
+            linestyle="--",
+        )
+        ax4_twin.set_ylabel("KL Divergence", color="tab:brown")
+        ax4_twin.tick_params(axis="y", labelcolor="tab:brown")
+        ax4.set_title("Perceptual (Left) & KL (Right) Regularization")
+        lines = p1 + p2
+        labels = [handle.get_label() for handle in lines]
+        ax4.legend(lines, labels, loc="upper right")
+    else:
+        ax4.set_title("Perceptual Regularization")
+        ax4.legend(p1, ["Perceptual Loss"], loc="upper right")
 
     fig.tight_layout()
     fig.savefig(plot_file, dpi=150)

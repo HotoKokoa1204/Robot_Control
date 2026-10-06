@@ -141,7 +141,7 @@ def main() -> None:
 
     plt.tight_layout()
     out_file = Path(
-        "C:/Users/KafuuChino/.gemini/antigravity/brain/4303624a-de40-4c9b-b2bf-6891112bda38/three_stage_comparison_panel.png"
+        "C:/Users/KafuuChino/.gemini/antigravity/brain/4303624a-de40-4c9b-b2bf-6891112bda38/three_stage_ae_comparison_panel.png"
     )
     out_file.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(str(out_file), dpi=150, bbox_inches="tight")
