@@ -12,9 +12,9 @@ import cv2
 import hydra
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.models.vae import VAE
+from agilab_lib.utils.storage import resolve_project_path
+from omegaconf import DictConfig, OmegaConf
 
 
 def build_side_by_side_frame(
@@ -65,14 +65,18 @@ def build_side_by_side_frame(
     return np.hstack([orig_scaled, recon_scaled])
 
 
-@hydra.main(
-    version_base=None, config_path="../configs", config_name="reconstruct_video"
-)
-def main(cfg: DictConfig) -> None:
+def reconstruct_video(cfg: DictConfig) -> Tuple[Path, Path]:
     """Evaluates VAE reconstruction quality on a target video file.
 
     Args:
         cfg: Hydra configuration dictionary.
+
+    Returns:
+        Tuple of (output_video_path, sample_frames_dir).
+
+    Raises:
+        FileNotFoundError: If checkpoint or video file does not exist.
+        ValueError: If unable to open video stream.
     """
     print("Executing video reconstruction evaluation with config:")
     print(OmegaConf.to_yaml(cfg))
@@ -82,17 +86,17 @@ def main(cfg: DictConfig) -> None:
 
     # 1. Load VAE model
     vae = VAE(latent_dim=int(cfg.latent_dim)).to(device)
-    ckpt_path = Path(str(cfg.vae_checkpoint))
+    ckpt_path = resolve_project_path(str(cfg.vae_checkpoint))
     if not ckpt_path.exists():
         raise FileNotFoundError(f"VAE checkpoint not found at: {ckpt_path}")
 
-    state_dict = torch.load(ckpt_path, map_location=device)
+    state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
     vae.load_state_dict(state_dict)
     vae.eval()
     print(f"Loaded VAE checkpoint from: {ckpt_path}")
 
     # 2. Open target video
-    video_path = Path(str(cfg.video_path))
+    video_path = resolve_project_path(str(cfg.video_path))
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found at: {video_path}")
 
@@ -109,7 +113,7 @@ def main(cfg: DictConfig) -> None:
     out_w = width * scale * 2
     out_h = height * scale
 
-    output_video_path = Path(str(cfg.output_video))
+    output_video_path = resolve_project_path(str(cfg.output_video))
     output_video_path.parent.mkdir(parents=True, exist_ok=True)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -117,7 +121,7 @@ def main(cfg: DictConfig) -> None:
         str(output_video_path), fourcc, int(cfg.fps), (out_w, out_h)
     )
 
-    sample_dir = Path(str(cfg.sample_frames_dir))
+    sample_dir = resolve_project_path(str(cfg.sample_frames_dir))
     sample_dir.mkdir(parents=True, exist_ok=True)
 
     sample_frame_indices = {
@@ -172,6 +176,19 @@ def main(cfg: DictConfig) -> None:
     writer.release()
     print(f"Reconstructed video saved to: {output_video_path}")
     print(f"Sample images saved: {len(saved_samples)} images in {sample_dir}")
+    return output_video_path, sample_dir
+
+
+@hydra.main(
+    version_base=None, config_path="../configs", config_name="reconstruct_video"
+)
+def main(cfg: DictConfig) -> None:
+    """Evaluates VAE reconstruction quality on a target video file.
+
+    Args:
+        cfg: Hydra configuration dictionary.
+    """
+    reconstruct_video(cfg)
 
 
 if __name__ == "__main__":

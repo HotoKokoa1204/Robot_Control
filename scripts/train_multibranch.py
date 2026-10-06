@@ -25,8 +25,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from tqdm import tqdm  # noqa: E402
-
 from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
     DualSourceBatch,
     DualSourceVideoDataset,
@@ -35,6 +33,8 @@ from agilab_lib.datasets.dual_source_dataset import (  # noqa: E402
 )
 from agilab_lib.models.joint_loss import JointNavigationLoss  # noqa: E402
 from agilab_lib.models.joint_navigation import JointNavigationModel  # noqa: E402
+from agilab_lib.utils.storage import resolve_project_path  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 
 def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
@@ -56,12 +56,8 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
         ValueError: If directories contain no videos and
             use_dummy_if_missing is False.
     """
-    one_path_dir = DualSourceVideoDataset._resolve_dir(
-        cfg.get("one_path_dir", "data/one_path")
-    )
-    rotation_dir = DualSourceVideoDataset._resolve_dir(
-        cfg.get("rotation_dir", "data/360")
-    )
+    one_path_dir = resolve_project_path(cfg.get("one_path_dir", "data/one_path"))
+    rotation_dir = resolve_project_path(cfg.get("rotation_dir", "data/360"))
     use_dummy = bool(cfg.get("use_dummy_if_missing", True))
     recon_source = str(cfg.get("recon_source", "random"))
 
@@ -392,7 +388,7 @@ def train_multibranch(
             and str(vae_ckpt).lower() != "none"
             and str(vae_ckpt).lower() != "null"
         ):
-            vae_path = DualSourceVideoDataset._resolve_dir(str(vae_ckpt))
+            vae_path = resolve_project_path(str(vae_ckpt))
             if vae_path.exists():
                 model.load_vae_pretrained(vae_path)
                 print(f"Warm-started VAE from checkpoint: {vae_path}")
@@ -512,9 +508,7 @@ def train_multibranch(
 
     # 7. Training loop parameters and telemetry tracking
     save_interval = int(cfg.get("save_interval_epochs", 5))
-    output_dir = DualSourceVideoDataset._resolve_dir(
-        cfg.get("output_dir", "checkpoints")
-    )
+    output_dir = resolve_project_path(cfg.get("output_dir", "checkpoints"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     history: Dict[str, List[float]] = {
