@@ -176,6 +176,7 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
         video_fps: float = 60.0,
         straight_video_speed_mps: float = 2.5,
         step_distance_meters: Optional[float] = None,
+        max_rotation_deg: Optional[float] = 30.0,
         seed: Optional[int] = None,
     ) -> None:
         """Initialize DummyDualSourceVideoDataset.
@@ -196,6 +197,8 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
             straight_video_speed_mps: Robot cruise forward velocity in meters/sec.
             step_distance_meters: Forward displacement per frame offset. If None,
                 computed as straight_video_speed_mps / video_fps.
+            max_rotation_deg: Maximum rotation angle in degrees for synthetic samples.
+                Defaults to 30.0 (+-30 deg). If None, full +-180 deg is used.
             seed: Optional random seed for reproducible sample generation.
         """
         super().__init__()
@@ -231,6 +234,9 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
             )
             self.buffer_frames = 0
 
+        self.max_rotation_deg = (
+            float(max_rotation_deg) if max_rotation_deg is not None else None
+        )
         self.seed = seed
         self._rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -283,7 +289,11 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
                 generator=torch_gen,
                 dtype=torch.float32,
             )
-            angle_rad = gen_rng.uniform(-math.pi, math.pi)
+            if self.max_rotation_deg is not None:
+                max_rad = math.radians(float(self.max_rotation_deg))
+                angle_rad = gen_rng.uniform(-max_rad, max_rad)
+            else:
+                angle_rad = gen_rng.uniform(-math.pi, math.pi)
             use_fwd = gen_rng.random() < 0.5
         else:
             fwd_current = torch.rand(
@@ -299,7 +309,11 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
             rot_target = torch.rand(
                 3, self.img_height, self.img_width, dtype=torch.float32
             )
-            angle_rad = self._rng.uniform(-math.pi, math.pi)
+            if self.max_rotation_deg is not None:
+                max_rad = math.radians(float(self.max_rotation_deg))
+                angle_rad = self._rng.uniform(-max_rad, max_rad)
+            else:
+                angle_rad = self._rng.uniform(-math.pi, math.pi)
             use_fwd = self._rng.random() < 0.5
 
         fwd_distance = torch.tensor([dist_val], dtype=torch.float32)
@@ -357,6 +371,7 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
         max_forward_offset: int = 72,
         min_forward_offset: int = 1,
         max_rotation_offset: Optional[int] = None,
+        max_rotation_deg: Optional[float] = 30.0,
         buffer_distance_meters: float = 2.0,
         buffer_frames: Optional[int] = None,
         samples_per_video: Optional[int] = 50,
@@ -383,6 +398,8 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
             min_forward_offset: Minimum frame offset between forward pair frames.
             max_rotation_offset: Maximum frame offset between rotation pair frames.
                 If None, pairs cover full 360-degree rotation up to +-180 deg.
+            max_rotation_deg: Maximum rotation angle in degrees (e.g. 30.0 restricts
+                sampled pairs to [-30 deg, +30 deg]). Defaults to 30.0.
             buffer_distance_meters: Physical margin in meters to exclude from video
                 ends to omit acceleration and deceleration zones. Defaults to 2.0.
             buffer_frames: Frame margin to exclude from video ends. Overrides
@@ -444,6 +461,9 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
             max(1, int(max_rotation_offset))
             if max_rotation_offset is not None
             else None
+        )
+        self.max_rotation_deg = (
+            float(max_rotation_deg) if max_rotation_deg is not None else None
         )
 
         resolved_one_path = self._resolve_dir(one_path_dir)
@@ -542,6 +562,11 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                 if self.max_rotation_offset is not None
                 else half_turn
             )
+            if self.max_rotation_deg is not None:
+                max_deg_offset = int(
+                    math.floor(float(n_frames) * (float(self.max_rotation_deg) / 360.0))
+                )
+                eff_max_offset = min(eff_max_offset, max_deg_offset)
             eff_max_offset = max(1, eff_max_offset)
 
             if samples_per_video is not None:
@@ -550,9 +575,22 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                     offset = rng.randint(-eff_max_offset, eff_max_offset)
                     if offset == 0:
                         offset = 1 if rng.random() < 0.5 else -1
-                    j = (t + offset) % n_frames
+                    if 0 <= t + offset < n_frames:
+                        j = t + offset
+                    else:
+                        candidate_j = t - offset
+                        if 0 <= candidate_j < n_frames:
+                            j = candidate_j
+                            offset = -offset
+                        else:
+                            j = (t + offset) % n_frames
                     angle_raw = float(offset) * (360.0 / max(float(n_frames), 1.0))
                     angle = ((angle_raw + 180.0) % 360.0) - 180.0
+                    if (
+                        self.max_rotation_deg is not None
+                        and abs(angle) > float(self.max_rotation_deg) + 1e-4
+                    ):
+                        continue
                     rad = angle * math.pi / 180.0
                     sin_cos = (math.sin(rad), math.cos(rad))
                     self.rot_pairs.append((vp, t, j, sin_cos))
@@ -562,9 +600,22 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                         offset = rng.randint(-eff_max_offset, eff_max_offset)
                         if offset == 0:
                             offset = 1 if rng.random() < 0.5 else -1
-                        j = (t + offset) % n_frames
+                        if 0 <= t + offset < n_frames:
+                            j = t + offset
+                        else:
+                            candidate_j = t - offset
+                            if 0 <= candidate_j < n_frames:
+                                j = candidate_j
+                                offset = -offset
+                            else:
+                                j = (t + offset) % n_frames
                         angle_raw = float(offset) * (360.0 / max(float(n_frames), 1.0))
                         angle = ((angle_raw + 180.0) % 360.0) - 180.0
+                        if (
+                            self.max_rotation_deg is not None
+                            and abs(angle) > float(self.max_rotation_deg) + 1e-4
+                        ):
+                            continue
                         rad = angle * math.pi / 180.0
                         sin_cos = (math.sin(rad), math.cos(rad))
                         self.rot_pairs.append((vp, t, j, sin_cos))

@@ -8,6 +8,7 @@ img_width: 192
 video_fps: 60.0
 straight_video_speed_mps: 2.5
 buffer_distance_meters: 2.0
+max_rotation_deg: 30.0 # Restrict rotation pair angle conditioning to +-30 degrees
 recon_source: "random"
 use_dummy_if_missing: true
 rotation_one_per_subfolder: true # Pick at most 1 rotation video per subfolder in data/360

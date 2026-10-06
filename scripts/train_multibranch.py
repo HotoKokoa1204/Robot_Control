@@ -79,6 +79,8 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
             )
 
             buffer_dist = float(cfg.get("buffer_distance_meters", 2.0))
+            max_rot_deg = cfg.get("max_rotation_deg", 30.0)
+            max_rot_deg_val = float(max_rot_deg) if max_rot_deg is not None else None
             dataset = DualSourceVideoDataset(
                 one_path_dir=one_path_dir,
                 rotation_dir=rotation_dir,
@@ -89,6 +91,7 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
                     cfg.get("straight_video_speed_mps", 2.5)
                 ),
                 buffer_distance_meters=buffer_dist,
+                max_rotation_deg=max_rot_deg_val,
                 max_videos_per_source=max_vids_val,
                 samples_per_video=samples_per_vid_val,
                 num_samples=num_samples_val,
@@ -121,12 +124,15 @@ def get_dataset(cfg: DictConfig) -> Dataset[DualSourceBatch]:
         )
 
     print("Instantiating DummyDualSourceVideoDataset for training.")
+    max_rot_deg = cfg.get("max_rotation_deg", 30.0)
+    max_rot_deg_val = float(max_rot_deg) if max_rot_deg is not None else None
     return DummyDualSourceVideoDataset(
         num_samples=int(cfg.get("num_samples", 64)),
         img_height=int(cfg.get("img_height", 108)),
         img_width=int(cfg.get("img_width", 192)),
         recon_source=recon_source,
         buffer_distance_meters=float(cfg.get("buffer_distance_meters", 2.0)),
+        max_rotation_deg=max_rot_deg_val,
         seed=cfg.get("seed", 42),
     )
 

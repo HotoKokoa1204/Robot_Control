@@ -12,7 +12,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceVideoDataset,
     dual_source_collate_fn,
@@ -32,6 +31,7 @@ def main() -> None:
         img_height=108,
         img_width=192,
         buffer_distance_meters=2.0,
+        max_rotation_deg=30.0,
         rotation_one_per_subfolder=True,
         preload_frames=False,
         recon_source="random",
@@ -97,12 +97,13 @@ def main() -> None:
 
     # Plot panel
     n = len(indices)
-    fig, axes = plt.subplots(n, 6, figsize=(18, 3.2 * n))
+    fig, axes = plt.subplots(n, 7, figsize=(21, 3.2 * n))
     cols = [
         "Fwd Current (GT)",
         "Fwd Recon",
         "Fwd Target (GT)",
         "Fwd Pred",
+        "Rot Current (GT)",
         "Rot Target (GT)",
         "Rot Pred",
     ]
@@ -131,13 +132,17 @@ def main() -> None:
         axes[i, 3].set_title(f"Pred (+{dist:.2f}m)", fontsize=10)
         axes[i, 3].axis("off")
 
-        axes[i, 4].imshow(rot_tgt[i])
-        axes[i, 4].set_title(f"Rot Target ({deg:+.1f} deg)", fontsize=10)
+        axes[i, 4].imshow(rot_curr[i])
+        axes[i, 4].set_title("Rot Input", fontsize=10)
         axes[i, 4].axis("off")
 
-        axes[i, 5].imshow(rot_pred[i])
-        axes[i, 5].set_title(f"Rot Pred ({deg:+.1f} deg)", fontsize=10)
+        axes[i, 5].imshow(rot_tgt[i])
+        axes[i, 5].set_title(f"Rot Target ({deg:+.1f} deg)", fontsize=10)
         axes[i, 5].axis("off")
+
+        axes[i, 6].imshow(rot_pred[i])
+        axes[i, 6].set_title(f"Rot Pred ({deg:+.1f} deg)", fontsize=10)
+        axes[i, 6].axis("off")
 
     plt.tight_layout()
     out_file = Path(
