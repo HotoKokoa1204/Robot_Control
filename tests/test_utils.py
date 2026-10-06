@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import torch
 import torch.nn as nn
+
 from agilab_lib.utils.eval_metrics import (
     decode_latents_to_frames,
     evaluate_angle_prediction_mae,

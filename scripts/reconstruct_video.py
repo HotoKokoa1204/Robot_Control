@@ -12,8 +12,9 @@ import cv2
 import hydra
 import numpy as np
 import torch
-from agilab_lib.models.vae import VAE
 from omegaconf import DictConfig, OmegaConf
+
+from agilab_lib.models.vae import VAE
 
 
 def build_side_by_side_frame(
