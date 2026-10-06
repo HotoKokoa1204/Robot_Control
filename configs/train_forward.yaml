@@ -1,0 +1,23 @@
+# @package _global_
+
+# Training mode: "forward"
+mode: "forward"
+
+# Model architecture settings: lightweight 2 residual blocks
+latent_dim: 128
+hidden_dim: 128
+num_blocks: 2
+block_inner_dim: 128
+
+# Optimization hyperparameters
+lr: 0.0005
+batch_size: 256
+max_epochs: 100
+
+# Data and checkpoint settings
+data_dir: "data/latents/one_path"
+max_frame_offset: null
+return_sin_cos: false
+use_dummy_if_missing: true
+vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for inference validation
+output_checkpoint: "checkpoints/forward_transformer.pt"

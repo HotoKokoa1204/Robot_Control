@@ -1,0 +1,25 @@
+# @package _global_
+
+# Model architecture settings
+latent_dim: 128
+hidden_dims:
+  - 256
+  - 128
+use_batch_norm: true
+
+# Optimization hyperparameters
+lr: 0.0005
+batch_size: 256
+max_epochs: 100
+
+# Loss supervision weights
+lambda_recon: 1.0
+lambda_angle: 1.0
+
+# Data and checkpoint settings
+data_dir: "data/latents/360"
+max_frame_offset: null  # null defaults to full trajectory (+-180 deg) in rotation mode
+use_dummy_if_missing: true
+rlt_checkpoint: "checkpoints/rlt_model.pt"
+vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for feature extraction verification
+output_checkpoint: "checkpoints/angle_predictor.pt"

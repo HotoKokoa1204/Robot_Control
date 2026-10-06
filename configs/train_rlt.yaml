@@ -1,0 +1,31 @@
+# @package _global_
+
+# Training mode: "rotation" or "forward"
+mode: "rotation"
+
+# Model architecture settings
+latent_dim: 128
+hidden_dim: 128
+num_blocks: 5
+block_inner_dim: 128
+
+# Optimization hyperparameters
+lr: 0.0005
+batch_size: 256
+max_epochs: 100
+
+# Data and checkpoint settings
+data_dir: "data/latents/360"
+max_frame_offset: null  # null defaults to full trajectory (+-180 deg) in rotation mode
+use_dummy_if_missing: true
+vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for inference validation
+output_checkpoint: "checkpoints/rlt_model.pt"
+
+# Speed calibration and buffer trimming (forward mode)
+video_fps: 60.0
+straight_video_speed_mps: 2.5
+buffer_distance_meters: null  # set to 3.0 for forward mode with accel/decel trimming
+
+# Decoded image reconstruction loss settings
+use_image_loss: false  # set true to enable VAE decoded image MSE loss
+image_loss_weight: 1.0  # weighting factor lambda for image reconstruction MSE

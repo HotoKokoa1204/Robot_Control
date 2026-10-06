@@ -1,0 +1,23 @@
+# @package _global_
+
+# Training mode: "rotation"
+mode: "rotation"
+
+# Model architecture settings
+latent_dim: 128
+hidden_dim: 128
+num_blocks: 5
+block_inner_dim: 128
+
+# Optimization hyperparameters
+lr: 0.0005
+batch_size: 256
+max_epochs: 100
+
+# Data and checkpoint settings
+data_dir: "data/latents/360"
+max_frame_offset: null  # null defaults to full trajectory (+-180 deg)
+return_sin_cos: true
+use_dummy_if_missing: true
+vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for inference validation
+output_checkpoint: "checkpoints/rotation_transformer.pt"

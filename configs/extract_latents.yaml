@@ -1,0 +1,20 @@
+# @package _global_
+
+# VAE model settings
+vae_checkpoint: "checkpoints/vae.pt"
+latent_dim: 128
+
+# Source videos settings
+data_root: "data"
+categories:
+  - "360"
+one_per_subfolder_categories:
+  - "360"
+max_videos_per_category: null # Set to null to extract all videos
+frameskip: 1
+img_width: 192
+img_height: 108
+batch_size: 32
+
+# Output cache directory
+output_dir: "data/latents"

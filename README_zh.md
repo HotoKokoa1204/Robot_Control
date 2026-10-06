@@ -1,4 +1,4 @@
-# [專案名稱]
+# 視覺導航系統 (Visual Navigation System)
 
 繁體中文 | [English](README.md)
 
@@ -6,77 +6,154 @@
 
 ## 專案簡介
 
-*(請在此簡短描述本研究專案的背景、解決的核心問題以及主要貢獻。)*
+**Visual Navigation System** 是由 AGILAB 實驗室開發的視覺導航與影片表示學習研究函式庫與實驗管線。
+
+本系統透過 **VAE**（Variational Autoencoder）將連續影像觀測壓縮為低維度的 **Latent Vector**（潛在向量），依據歐式距離門檻 **Tau ($\tau$)** 自動篩選導航地標（**Keyframe**，關鍵影格），使用以 3D **Motion Command**（運動指令）為條件的 **Residual Latent Transformer** 預測未來的潛在狀態，藉由 **RRDN** 超解析度解碼器提升重建影像畫質，並由 **Angle Predictor** 預測相對轉角控制指令以引導機器人移動。
+
+### 核心架構模組
+
+- **VAE**（Variational Autoencoder）：將 RGB 影像影格 $(3, 108, 192)$ 壓縮編碼為 128 維的 **Latent Vector**，透過高斯先驗正則化構建連續平滑之潛在空間，並負責將潛在向量還原回影像空間。
+- **Residual Latent Transformer**：以結合旋轉角度 $\theta$（度數）與直線位移距離 $d$（公尺）的 3D **Motion Command** 控制向量 $[\sin \theta, \cos \theta, d]$ 為條件，預測未來的 Latent Vector。
+- **RRDN** (Residual in Residual Dense Network)：增強型超解析度解碼器，提升 Latent Vector 解碼還原影像之邊緣與空間細節。
+- **Angle Predictor**：接收當前影格與目標 Keyframe 的 Latent Vector 組合，預測相對旋轉角度作為 Motion Command 控制指令。
+- **Keyframe Extraction**：沿影片軌跡計算連續影格之 Latent Vector 歐式距離，當距離大於等於 $\tau$ 時記錄關鍵影格索引。
+
+---
 
 ## 安裝指南
 
 ### 系統需求
-- [Anaconda](https://www.anaconda.com/products/distribution) 或 [Miniconda](https://docs.conda.io/en/latest/miniconda.html)
+
+- Python 3.10+（已在 Python 3.13 進行相容性測試）
+- PyTorch 2.0+
+- 支援 CUDA 之 GPU（選用，支援 CPU 運作）
 
 ### 環境設定步驟
 
 1. **複製專案：**
    ```bash
    git clone <repository_url>
-   cd <repository_name>
+   cd Visual_Navigation_System
    ```
 
-2. **建立並啟動虛擬環境：**
-   此指令會安裝所有底層系統依賴（如 CUDA）並將本地的 Python 套件以開發模式 (editable mode) 安裝。
+2. **以開發模式 (editable mode) 安裝套件與開發相依套件：**
    ```bash
-   conda env create -f environment.yml
-   conda activate agilab_env
+   pip install -e ".[dev]"
    ```
 
-3. **安裝 pre-commit hooks（強烈建議）：**
-   確保程式碼提交前自動進行排版與檢查。
+3. **安裝 pre-commit hooks：**
    ```bash
    pre-commit install
    ```
 
+---
+
 ## 專案架構
 
 ```text
-.
-├── configs/            # YAML 組態設定檔 (Hydra/OmegaConf)
-├── data/               # 資料集、權重檔與日誌 (預設被 Git 忽略)
-├── docker/             # 供容器化部署的 Docker 設定
-├── docs/               # 專案說明文件 (Sphinx/MkDocs)
-├── notebooks/          # 供探索性分析與繪圖的 Jupyter Notebooks
-├── scripts/            # 批次腳本與 SLURM 叢集執行腳本
-├── src/project_name/   # 核心 Python 原始碼套件
-└── tests/              # 自動化測試程式碼 (PyTest)
+Visual_Navigation_System/
+├── configs/                          # Hydra YAML 組態設定檔
+│   ├── train_vae.yaml                # VAE 模型訓練設定
+│   ├── extract_keyframes.yaml        # Keyframe 提取設定
+│   ├── extract_latents.yaml          # 離線 Latent 快取設定
+│   ├── generate_video.yaml           # 影片插值生成與 RRDN 解碼設定
+│   ├── train_rlt.yaml                # Residual Latent Transformer 訓練設定
+│   └── train_angle_predictor.yaml    # Angle Predictor 訓練設定
+├── scripts/                          # 核心管線執行腳本
+│   ├── train_vae.py                  # Script 0: 訓練 VAE 視覺表徵模型
+│   ├── extract_keyframes.py          # Script 1: 依據 Tau (τ) 提取 Keyframes
+│   ├── extract_latents.py            # Script 2: 離線預先提取並快取 Latent Vectors
+│   ├── generate_video.py             # Script 3: Latent 插值解碼與影片匯出
+│   ├── train_rlt.py                  # Script 4: 訓練 Residual Latent Transformer
+│   └── train_angle_predictor.py      # Script 5: 訓練 Angle Predictor
+├── src/
+│   └── agilab_lib/                   # 可安裝之核心 Python 函式庫
+│       ├── datasets/                 # 影片、快取 Latent 軌跡與 SR 資料集
+│       ├── models/                   # VAE, RLT, Angle Predictor, RRDN
+│       └── utils/                    # 內插, PCA, Keyframe 提取, 評估指標
+└── tests/                            # PyTest 自動化測試套件 (34 個單元測試)
 ```
 
-## 使用說明
+---
 
-*(請提供幾個執行核心實驗或程式碼的範例。)*
+## 管線使用說明
 
-### 範例：執行訓練腳本
+所有管線腳本均採用 [Hydra](https://hydra.cc/) 進行階層式參數管理與 CLI 覆寫。
+
+### 1. Keyframe 提取
+
+依據 Latent Vector 歐式距離門檻 Tau ($\tau \ge 1.5$) 自動提取最具代表性的關鍵影格：
 
 ```bash
-# 使用 python 執行腳本的範例
-python scripts/train.py --config configs/train.yaml
+python scripts/extract_keyframes.py video_path=data/input_video.mp4 tau=1.5 output_json=data/keyframes.json
 ```
+
+### 2. 影片生成與潛在向量插值
+
+在提取的 Keyframes 之間進行線性潛在向量插值，解碼為影格，並可選擇性啟用 RRDN 超解析度增強，輸出為 `.mp4` 格式：
+
+```bash
+# 標準解碼
+python scripts/generate_video.py video_path=data/input_video.mp4 keyframes_json=data/keyframes.json interp_steps=5
+
+# 啟用 RRDN 超解析度解碼
+python scripts/generate_video.py video_path=data/input_video.mp4 keyframes_json=data/keyframes.json use_rrdn=true
+```
+
+### 3. 訓練 Residual Latent Transformer
+
+支援單一運動模式（純旋轉或純前進）的未來潛在狀態預測訓練：
+
+```bash
+# 純旋轉模式 (distance_meters 自動歸零)
+python scripts/train_rlt.py mode=rotation max_epochs=10 batch_size=16
+
+# 純前進模式 (angle_deg 自動歸零)
+python scripts/train_rlt.py mode=forward max_epochs=10 batch_size=16
+```
+
+### 4. 訓練 Angle Predictor
+
+輸入當前影格與目標 Keyframe 的潛在向量對，採用 MAE 損失優化相對轉角預測器：
+
+```bash
+python scripts/train_angle_predictor.py max_epochs=10 batch_size=16
+```
+
+---
+
+## 測試與品質驗證
+
+執行完整的自動化測試套件：
+
+```bash
+pytest tests/ -v
+```
+
+執行全模組靜態格式化與 AGILAB 代碼規範檢查：
+
+```bash
+pre-commit run --all-files
+```
+
+---
 
 ## 貢獻指南
 
-本專案遵循 AGILAB 的統一開發規範。在開始貢獻之前，請先參閱 [AGILAB Software Lab Guide](https://agilab-ntnu.github.io/AGILAB_Software_Lab_Guide/zh/contributing/) 以瞭解分支策略與程式碼規範。
+本專案遵循 AGILAB 的統一開發規範。在開始貢獻之前，請參閱 `AGENTS.md` 與 [AGILAB Software Lab Guide](https://agilab-ntnu.github.io/AGILAB_Software_Lab_Guide/zh/contributing/) 以瞭解分支策略與程式碼規範。
 
 ## 引用 (Citation)
 
-如果您在研究中使用了本專案，請使用以下格式進行引用：
-
 ```bibtex
-@article{author_year_title,
-  author = {Author, First and Author, Second},
-  title = {Project Title},
-  journal = {Journal or Conference Name},
+@article{kafuuchino_2026_visual_navigation,
+  author = {KafuuChino},
+  title = {Visual Navigation System: Representation Learning and Motion Prediction},
+  journal = {AGILAB Research},
   year = {2026},
-  url = {https://github.com/AGILAB-NTNU/SoftwareTemplate}
+  url = {https://github.com/AGILAB-NTNU/Visual_Navigation_System}
 }
 ```
 
 ## 授權條款
 
-*(請在此加上您的開源授權條款)*
+MIT License

@@ -1,0 +1,15 @@
+# @package _global_
+
+# Video input configuration
+video_path: "data/input_video.mp4"
+
+# VAE model settings
+latent_dim: 128
+vae_checkpoint: "" # Optional path to pretrained VAE checkpoint
+
+# Keyframe extraction settings
+tau: 1.5 # Euclidean distance threshold in Latent Vector space (τ)
+use_dummy_if_missing: true # Fallback to dummy data for verification
+
+# Output configuration
+output_json: "data/keyframes.json"

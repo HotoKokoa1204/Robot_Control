@@ -3,18 +3,18 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "project_name"
+name = "agilab_lib"
 version = "0.1.0"
-description = "AGILAB Research Software Template"
+description = "Visual Navigation System - AGILAB Research Software"
 authors = [
-    {name = "AGILAB NTNU", email = "mjhsu@ntnu.edu.tw"}
+    {name = "KafuuChino"}
 ]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 dependencies = [
-    # Add your general python dependencies here
-    # "numpy>=1.24.0",
-    # "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+    "opencv-python>=4.8.0",
 ]
 
 [project.optional-dependencies]
@@ -28,10 +28,10 @@ dev = [
 where = ["src"]
 
 [tool.ruff]
-target-version = "py37"
+target-version = "py38"
 # Enable standard rules
 lint.select = ["E", "F", "W", "I", "N"]
-lint.ignore = []
+lint.ignore = ["N812"]
 
 # Exclude a variety of commonly ignored directories.
 exclude = [

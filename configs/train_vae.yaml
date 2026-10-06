@@ -1,0 +1,26 @@
+# @package _global_
+
+# Data settings
+data_root: "data"
+categories:
+  - "360"
+  - "one_path"
+one_per_subfolder_categories:
+  - "360"
+max_videos_per_category: null
+frameskip: 15
+img_height: 108
+img_width: 192
+cache_path: "data/vae_dataset_cache_88v.npy"
+
+# VAE model architecture settings
+latent_dim: 128
+beta_kl: 0.001
+
+# Optimization hyperparameters
+lr: 0.001
+batch_size: 64
+max_epochs: 100
+
+# Output checkpoint path
+output_checkpoint: "checkpoints/vae.pt"

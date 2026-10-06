@@ -1,0 +1,36 @@
+# @package _global_
+
+# Source video and keyframe metadata
+video_path: "data/360/A1_1/2025-07-16 00-30-14.mp4"
+keyframes_json: "data/keyframes_360_A1_1.json"
+
+# VAE configuration
+latent_dim: 128
+vae_checkpoint: "" # Optional path to pretrained VAE checkpoint
+
+# Interpolation configuration
+interp_steps: 30 # Number of intermediate frames inserted between keyframes
+
+# RRDN Enhanced Decoder configuration
+use_rrdn: false # Set true to upscale frames via RRDN
+rrdn_checkpoint: "" # Optional path to pretrained RRDN checkpoint
+rrdn_upscale_factor: 2
+
+# Output video settings
+output_video: "data/generated_video.mp4"
+fps: 30
+use_dummy_if_missing: true
+
+# Chained Latent Transformer configuration
+use_chained_transformer: false
+rotation_checkpoint: "" # Optional path to pretrained RotationLatentTransformer
+forward_checkpoint: "" # Optional path to pretrained ForwardLatentTransformer
+execution_order: "rotate_first" # "rotate_first" or "forward_first"
+motion_angle_deg: 0.0 # Rotation angle condition in degrees
+motion_distance_meters: 0.0 # Forward distance condition in meters
+substep_angle_deg: null # Optional angle step for progressive subdivision (e.g. 15.0)
+substep_distance_meters: null # Optional distance step for progressive subdivision (e.g. 0.25)
+hidden_dim: null # Optional hidden dimension (defaults to 512 if latent_dim==512 else 128)
+forward_num_blocks: null # Optional forward blocks (defaults to 5 if latent_dim==512 else 2)
+rotation_num_blocks: null # Optional rotation blocks (defaults to 5)
+block_inner_dim: null # Optional block inner dimension (defaults to hidden_dim)
