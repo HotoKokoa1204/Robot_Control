@@ -15,6 +15,10 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 
 from agilab_lib.models.vae import VAE
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 
 
 def extract_video_latents(
@@ -94,12 +98,17 @@ def extract_video_latents(
     }
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="extract_latents")
-def main(cfg: DictConfig) -> None:
-    """Entry point for offline Latent Vector extraction script.
+def extract_latents(cfg: DictConfig) -> Path:
+    """Extract and cache Latent Vectors from videos via VAE.
 
     Args:
         cfg: Hydra configuration dictionary.
+
+    Returns:
+        Path to the output directory containing extracted latents.
+
+    Raises:
+        FileNotFoundError: If VAE checkpoint is not found.
     """
     print("Executing Latent Vector offline extraction with config:")
     print(OmegaConf.to_yaml(cfg))
@@ -107,7 +116,7 @@ def main(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = VAE(latent_dim=int(cfg.latent_dim)).to(device)
-    vae_ckpt = Path(str(cfg.vae_checkpoint))
+    vae_ckpt = resolve_project_path(str(cfg.vae_checkpoint))
     if not vae_ckpt.exists():
         raise FileNotFoundError(f"VAE checkpoint not found: {vae_ckpt}")
 
@@ -115,8 +124,9 @@ def main(cfg: DictConfig) -> None:
     model.eval()
     print(f"Loaded VAE checkpoint from: {vae_ckpt}")
 
-    root = Path(str(cfg.data_root))
-    out_root = Path(str(cfg.output_dir))
+    root = resolve_project_path(str(cfg.data_root))
+    out_root = ensure_writable_output_path(str(cfg.output_dir))
+    out_root.mkdir(parents=True, exist_ok=True)
     video_exts = {".mp4", ".avi", ".mov", ".mkv"}
 
     max_per_cat = (
@@ -179,6 +189,17 @@ def main(cfg: DictConfig) -> None:
             )
 
     print("\nOffline Latent Vector extraction completed successfully.")
+    return out_root
+
+
+@hydra.main(version_base=None, config_path="../configs", config_name="extract_latents")
+def main(cfg: DictConfig) -> None:
+    """Entry point for offline Latent Vector extraction script.
+
+    Args:
+        cfg: Hydra configuration dictionary.
+    """
+    extract_latents(cfg)
 
 
 if __name__ == "__main__":

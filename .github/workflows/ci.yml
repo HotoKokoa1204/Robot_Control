@@ -14,10 +14,16 @@ jobs:
       - name: Install Ruff
         run: pip install ruff
 
+      - name: Check syntax and format
+        if: github.event_name == 'pull_request'
+        run: ruff check . && ruff format --check .
+
       - name: Fix syntax and format
+        if: github.event_name == 'push'
         run: ruff check . --fix && ruff format .
 
       - name: Auto-commit fixes
+        if: github.event_name == 'push'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "style: auto-fix by ruff [skip ci]"

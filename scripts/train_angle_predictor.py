@@ -5,7 +5,6 @@ Date: 2026-09-07
 Description: Train Angle Predictor for relative robot Motion Command prediction.
 """
 
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import hydra
@@ -21,6 +20,10 @@ from agilab_lib.datasets.latent_dataset import (
 from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 
 
 def get_dataset(
@@ -34,8 +37,13 @@ def get_dataset(
     Returns:
         A Dataset providing (start_latent, target_latent, sin_cos) tuples.
     """
-    data_path = Path(str(cfg.data_dir))
-    if data_path.exists():
+    data_dir_str = str(cfg.get("data_dir", "")).strip()
+    data_path = (
+        resolve_project_path(data_dir_str)
+        if data_dir_str
+        else resolve_project_path(".")
+    )
+    if data_dir_str and data_path.exists():
         max_offset = cfg.get("max_frame_offset", None)
         cached_dataset = CachedLatentDataset(
             cache_dir=data_path,
@@ -123,8 +131,13 @@ def main(cfg: DictConfig) -> None:
     ).to(device)
 
     rlt_model: Optional[ResidualLatentTransformer] = None
-    rlt_path = Path(str(cfg.get("rlt_checkpoint", "checkpoints/rlt_model.pt")))
-    if rlt_path.exists():
+    rlt_ckpt_str = cfg.get("rlt_checkpoint", "checkpoints/rlt_model.pt")
+    rlt_path = (
+        resolve_project_path(str(rlt_ckpt_str))
+        if rlt_ckpt_str and str(rlt_ckpt_str).strip()
+        else None
+    )
+    if rlt_path and rlt_path.exists():
         print(f"Loading pre-trained RotModel (teacher) from: {rlt_path}")
         rlt_model = ResidualLatentTransformer(
             latent_dim=int(cfg.latent_dim),
@@ -213,7 +226,7 @@ def main(cfg: DictConfig) -> None:
     run_validation_inference(model, cfg, device)
 
     # Save trained checkpoint
-    output_path = Path(str(cfg.output_checkpoint))
+    output_path = ensure_writable_output_path(str(cfg.output_checkpoint))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), output_path)
     print(f"Model checkpoint successfully saved to: {output_path}")

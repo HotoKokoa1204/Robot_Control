@@ -17,6 +17,10 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
 from agilab_lib.models.vae import VAE, vae_loss
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 
 
 def _extract_video_frames(args: Tuple[str, int, int, int]) -> np.ndarray:
@@ -139,7 +143,7 @@ def discover_video_files(cfg: DictConfig) -> List[Path]:
     Returns:
         List of matching video file paths.
     """
-    root = Path(str(cfg.data_root))
+    root = resolve_project_path(str(cfg.data_root))
     if not root.exists():
         return []
 
@@ -197,7 +201,11 @@ def main(cfg: DictConfig) -> None:
     video_paths = discover_video_files(cfg)
     print(f"Discovered {len(video_paths)} video files across categories.")
 
-    cache_path = str(cfg.cache_path) if cfg.get("cache_path") else None
+    cache_path = (
+        str(resolve_project_path(str(cfg.cache_path)))
+        if cfg.get("cache_path")
+        else None
+    )
     dataset = RealVideoFramesDataset(
         video_paths=video_paths,
         frameskip=int(cfg.frameskip),
@@ -254,7 +262,7 @@ def main(cfg: DictConfig) -> None:
             )
 
     # Save trained checkpoint
-    out_path = Path(str(cfg.output_checkpoint))
+    out_path = ensure_writable_output_path(str(cfg.output_checkpoint))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), out_path)
     print(f"VAE checkpoint successfully saved to: {out_path}")

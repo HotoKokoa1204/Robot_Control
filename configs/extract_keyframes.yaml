@@ -12,4 +12,4 @@ tau: 1.5 # Euclidean distance threshold in Latent Vector space (τ)
 use_dummy_if_missing: true # Fallback to dummy data for verification
 
 # Output configuration
-output_json: "data/keyframes.json"
+output_json: "outputs/keyframes/keyframes.json"

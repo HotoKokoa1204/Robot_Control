@@ -17,7 +17,7 @@ rrdn_checkpoint: "" # Optional path to pretrained RRDN checkpoint
 rrdn_upscale_factor: 2
 
 # Output video settings
-output_video: "data/generated_video.mp4"
+output_video: "outputs/eval/generated_video.mp4"
 fps: 30
 use_dummy_if_missing: true
 

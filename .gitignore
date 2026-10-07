@@ -8,7 +8,6 @@ __pycache__/
 
 #Ros 2
 build/
-build/
 log/
 
 # test
@@ -35,11 +34,22 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Data
-# Ignore everything in data except .gitkeep files to maintain directory structure
+# Data directory: strictly read-only ground truth
 data/*
 !data/**/.gitkeep
 !data/.gitkeep
+data/*.mp4
+data/*.png
+data/*.json
+data/*.npy
+data/decoded_cache/
+data/decoded_videos/
+data/latents/
+data/latents_512/
+data/reconstructed_samples/
+
+# Diagnostic scripts
+scripts/diagnose_rotation_pairs.py
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -60,9 +70,14 @@ venv.bak/
 *.swp
 *.swo
 
-# Tools
+# Tools & Cache
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+.cache/
+
+# Storage & Worktrees
 outputs/
 checkpoints/
+.worktrees/
+worktrees/

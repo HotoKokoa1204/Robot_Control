@@ -2,7 +2,6 @@
 
 import math
 import sys
-from pathlib import Path
 
 sys.path.insert(0, "src")
 
@@ -18,6 +17,10 @@ from agilab_lib.datasets.dual_source_dataset import (
     dual_source_collate_fn,
 )
 from agilab_lib.models.joint_navigation import JointNavigationModel
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    resolve_project_path,
+)
 
 
 def main() -> None:
@@ -40,9 +43,9 @@ def main() -> None:
     )
 
     # Load trained model
-    ckpt_path = Path("checkpoints/final_joint_model.pt")
+    ckpt_path = resolve_project_path("checkpoints/final_joint_model.pt")
     if not ckpt_path.exists():
-        ckpt_path = Path("checkpoints/joint_navigation_model.pt")
+        ckpt_path = resolve_project_path("checkpoints/joint_navigation_model.pt")
     print(f"Loading checkpoint: {ckpt_path}")
     model = JointNavigationModel().to(device)
     state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
@@ -146,8 +149,8 @@ def main() -> None:
         axes[i, 6].axis("off")
 
     plt.tight_layout()
-    out_file = Path(
-        "C:/Users/KafuuChino/.gemini/antigravity/brain/4303624a-de40-4c9b-b2bf-6891112bda38/three_stage_ae_comparison_panel.png"
+    out_file = ensure_writable_output_path(
+        "outputs/eval/three_stage_ae_comparison_panel.png"
     )
     out_file.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(str(out_file), dpi=150, bbox_inches="tight")

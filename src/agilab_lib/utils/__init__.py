@@ -1,9 +1,8 @@
-"""
-Module: utils
+"""Module: utils
 Stage: Library
 Author: KafuuChino
 Date: 2026-09-07
-Description: Utility package with interpolation, evaluation, and PCA tools.
+Description: Utility package with interpolation, evaluation, PCA, and storage tools.
 """
 
 from agilab_lib.utils.eval_metrics import (
@@ -17,6 +16,15 @@ from agilab_lib.utils.interpolation import (
 )
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.pca import BatchedPCA
+from agilab_lib.utils.storage import (
+    ensure_writable_output_path,
+    get_cache_dir,
+    get_checkpoints_dir,
+    get_data_dir,
+    get_outputs_dir,
+    get_project_root,
+    resolve_project_path,
+)
 
 __all__ = [
     "linear_interpolate_latent_sequence",
@@ -26,4 +34,11 @@ __all__ = [
     "decode_latents_to_frames",
     "extract_keyframe_indices",
     "BatchedPCA",
+    "get_project_root",
+    "resolve_project_path",
+    "get_outputs_dir",
+    "get_checkpoints_dir",
+    "get_data_dir",
+    "get_cache_dir",
+    "ensure_writable_output_path",
 ]
