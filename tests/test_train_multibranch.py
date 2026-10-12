@@ -1,25 +1,22 @@
-"""
-Module: test_train_multibranch
+"""Module: test_train_multibranch
 Stage: Test
 Author: KafuuChino
-Date: 2026-09-29
-Description: Integration and unit tests for joint multi-branch training script,
-    verifying Hydra config loading, three-stage curricular execution, AMP execution,
-    gradient accumulation, telemetry logging, loss curve plotting, and milestone
-    checkpoint exports.
+Date: 2026-10-12
+Description: Integration and regression tests for train_multibranch CLI driver
+    and CurricularTrainingPipeline core interface.
 """
 
 import math
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 # Windows DLL initialization guard for PIL/torchvision
 from PIL import Image  # isort: skip # noqa: F401
 
-import pytest
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
@@ -30,12 +27,13 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
-from scripts.train_multibranch import (
-    get_dataset,
+from agilab_lib.training import (
+    CurricularTrainingPipeline,
+    TrainingResult,
     plot_loss_curves,
     save_all_checkpoints,
-    train_multibranch,
 )
+from omegaconf import DictConfig, OmegaConf
 
 
 def test_config_loading() -> None:
@@ -92,34 +90,50 @@ def test_config_loading() -> None:
     assert cfg.save_interval_epochs == 5
 
 
-def test_get_dataset_fallback(tmp_path: Path) -> None:
-    """Verify get_dataset falls back to DummyDualSourceVideoDataset when missing."""
-    cfg = OmegaConf.create(
-        {
-            "one_path_dir": str(tmp_path / "nonexistent_one_path"),
-            "rotation_dir": str(tmp_path / "nonexistent_360"),
-            "use_dummy_if_missing": True,
-            "num_samples": 8,
-            "img_height": 108,
-            "img_width": 192,
-            "seed": 123,
-        }
-    )
+def test_cli_driver_execution(tmp_path: Path) -> None:
+    """Verify scripts/train_multibranch.py executes end-to-end as a CLI entrypoint."""
+    out_dir = tmp_path / "cli_driver_ckpts"
+    cmd = [
+        sys.executable,
+        "scripts/train_multibranch.py",
+        f"output_dir={out_dir}",
+        "max_epochs=1",
+        "stage1_epochs=1",
+        "stage2_epochs=0",
+        "stage3_epochs=0",
+        "num_samples=2",
+        "batch_size=2",
+        "use_dummy_if_missing=true",
+        "use_amp=false",
+        "sanity_check_min_std=0.001",
+    ]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = "src"
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert res.returncode == 0, f"CLI driver failed: {res.stderr}\n{res.stdout}"
+    assert (out_dir / "stage1_vae.pt").exists()
+    assert (out_dir / "final_joint_model.pt").exists()
 
-    dataset = get_dataset(cfg)
-    assert isinstance(dataset, DummyDualSourceVideoDataset)
-    assert len(dataset) == 8
 
-    # When fallback is disabled, should raise FileNotFoundError
-    cfg_strict = OmegaConf.create(
-        {
-            "one_path_dir": str(tmp_path / "nonexistent_one_path"),
-            "rotation_dir": str(tmp_path / "nonexistent_360"),
-            "use_dummy_if_missing": False,
-        }
-    )
-    with pytest.raises(FileNotFoundError):
-        get_dataset(cfg_strict)
+def test_cli_driver_missing_data_strict_fails(tmp_path: Path) -> None:
+    """Verify CLI driver exits with error when data dirs are missing
+    and fallback is disabled.
+    """
+    missing_one_path = tmp_path / "missing_one_path"
+    missing_360 = tmp_path / "missing_360"
+    cmd = [
+        sys.executable,
+        "scripts/train_multibranch.py",
+        f"one_path_dir={missing_one_path}",
+        f"rotation_dir={missing_360}",
+        "use_dummy_if_missing=false",
+        "max_epochs=1",
+    ]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = "src"
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert res.returncode != 0
+    assert "Missing data dirs" in res.stderr or "FileNotFoundError" in res.stderr
 
 
 def test_save_all_checkpoints_export(tmp_path: Path) -> None:
@@ -192,7 +206,7 @@ def test_plot_loss_curves(tmp_path: Path) -> None:
 
 
 def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
-    """Integration test: Verify training loop with gradient accumulation."""
+    """Integration test: Verify training loop execution with gradient accumulation."""
     dataset = DummyDualSourceVideoDataset(
         num_samples=8,
         img_height=108,
@@ -220,6 +234,9 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
             "use_amp": torch.cuda.is_available(),
             "max_epochs": 4,
             "warmup_vae_epochs": 0,
+            "stage1_epochs": 0,
+            "stage2_epochs": 4,
+            "stage3_epochs": 0,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
             "w_fwd": 1.0,
@@ -229,10 +246,12 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
             "save_interval_epochs": 2,
             "vae_checkpoint": None,
             "device": "cuda" if torch.cuda.is_available() else "cpu",
+            "verbose": False,
         }
     )
 
-    trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
+    pipeline = CurricularTrainingPipeline(cfg)
+    result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
 
     # Check telemetry keys
     for key in (
@@ -245,12 +264,12 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
         "fwd_latent",
         "rot_latent",
     ):
-        assert key in history
-        assert len(history[key]) == 4
-        assert all(math.isfinite(val) for val in history[key])
+        assert key in result.history
+        assert len(result.history[key]) == 4
+        assert all(math.isfinite(val) for val in result.history[key])
 
     # Check loss trend: loss should decrease over training
-    assert history["loss"][-1] < history["loss"][0]
+    assert result.history["loss"][-1] < result.history["loss"][0]
 
     # Verify exported checkpoints exist
     assert (out_dir / "joint_navigation_model.pt").exists()
@@ -261,7 +280,6 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
 
 def test_warm_start_vae_checkpoint(tmp_path: Path) -> None:
     """Verify warm-start loading of VAE weights during training initialization."""
-    # Pre-train / create a mock VAE checkpoint
     src_vae = VAE(latent_dim=64)
     with torch.no_grad():
         src_vae.fc_mu.weight.fill_(0.777)
@@ -275,6 +293,12 @@ def test_warm_start_vae_checkpoint(tmp_path: Path) -> None:
         img_width=192,
         seed=42,
     )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
 
     out_dir = tmp_path / "out"
     cfg = OmegaConf.create(
@@ -283,11 +307,16 @@ def test_warm_start_vae_checkpoint(tmp_path: Path) -> None:
             "hidden_dim": 32,
             "num_blocks": 2,
             "block_inner_dim": 32,
-            "lr": 0.001,
+            "lr": 0.0,
+            "lr_vae_stage1": 0.0,
             "batch_size": 2,
             "gradient_accumulation_steps": 2,
             "use_amp": False,
             "max_epochs": 1,
+            "stage1_epochs": 1,
+            "stage2_epochs": 0,
+            "stage3_epochs": 0,
+            "sanity_check_min_std": 0.1,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
             "w_fwd": 1.0,
@@ -297,13 +326,18 @@ def test_warm_start_vae_checkpoint(tmp_path: Path) -> None:
             "save_interval_epochs": 1,
             "vae_checkpoint": str(ckpt_path),
             "device": "cpu",
+            "verbose": False,
         }
     )
 
-    trained_model, history = train_multibranch(cfg, dataset=dataset)
-    assert isinstance(trained_model, JointNavigationModel)
-    assert len(history["loss"]) == 1
-    assert math.isfinite(history["loss"][0])
+    pipeline = CurricularTrainingPipeline(cfg)
+    result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
+    assert isinstance(result, TrainingResult)
+    assert len(result.history["loss"]) == 1
+    assert math.isfinite(result.history["loss"][0])
+    assert torch.allclose(
+        model.vae.fc_mu.weight, torch.full_like(model.vae.fc_mu.weight, 0.777)
+    )
 
 
 def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
@@ -333,6 +367,9 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
             "gradient_accumulation_steps": 2,
             "use_amp": torch.cuda.is_available(),
             "max_epochs": 1,
+            "stage1_epochs": 0,
+            "stage2_epochs": 1,
+            "stage3_epochs": 0,
             "warmup_vae_epochs": 0,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
@@ -343,16 +380,18 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
             "save_interval_epochs": 1,
             "vae_checkpoint": None,
             "device": "cuda" if torch.cuda.is_available() else "cpu",
+            "verbose": False,
         }
     )
 
-    trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
+    pipeline = CurricularTrainingPipeline(cfg)
+    result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
     assert not torch.allclose(
-        trained_model.forward_transformer.blocks[0].fc3.weight.cpu(),
+        model.forward_transformer.blocks[0].fc3.weight.cpu(),
         init_fwd_weight.cpu(),
     )
-    assert len(history["loss"]) == 1
-    assert math.isfinite(history["loss"][0])
+    assert len(result.history["loss"]) == 1
+    assert math.isfinite(result.history["loss"][0])
 
 
 def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
@@ -371,7 +410,6 @@ def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
     )
 
     out_dir = tmp_path / "two_stage_out"
-    # Stage 1: 2 epochs, Stage 2: 2 epochs (max_epochs=4)
     cfg = OmegaConf.create(
         {
             "latent_dim": 64,
@@ -384,11 +422,14 @@ def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
             "gradient_accumulation_steps": 1,
             "use_amp": torch.cuda.is_available(),
             "max_epochs": 4,
+            "stage1_epochs": 2,
+            "stage2_epochs": 2,
+            "stage3_epochs": 0,
             "warmup_vae_epochs": 2,
             "w_latent_min": 0.01,
             "w_latent_max": 1.0,
             "w_latent_ramp_start_epoch": 3,
-            "sanity_check_min_std": 0.1,  # Low threshold for random dummy images
+            "sanity_check_min_std": 0.1,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
             "w_fwd": 1.0,
@@ -398,13 +439,15 @@ def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
             "save_interval_epochs": 2,
             "vae_checkpoint": None,
             "device": "cuda" if torch.cuda.is_available() else "cpu",
+            "verbose": False,
         }
     )
 
-    trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
+    pipeline = CurricularTrainingPipeline(cfg)
+    result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
+    history = result.history
     assert len(history["loss"]) == 4
     # In Stage 1 (epoch 1 and 2), dynamics loss should be 0
-    # because Stage 1 reconstruction-only is active
     assert history["fwd"][0] == 0.0
     assert history["rot"][0] == 0.0
     # In Stage 2 (epoch 3 and 4), dynamics loss should be active (> 0)
@@ -445,7 +488,7 @@ def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None
             "stage2_epochs": 1,
             "stage3_epochs": 1,
             "w_latent": 1.0,
-            "sanity_check_min_std": 0.1,  # Low threshold for dummy images
+            "sanity_check_min_std": 0.1,
             "alpha_perc": 0.5,
             "beta_kl": 0.0001,
             "w_fwd": 1.0,
@@ -455,10 +498,13 @@ def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None
             "save_interval_epochs": 1,
             "vae_checkpoint": None,
             "device": "cpu",
+            "verbose": False,
         }
     )
 
-    trained_model, history = train_multibranch(cfg, dataset=dataset, model=model)
+    pipeline = CurricularTrainingPipeline(cfg)
+    result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
+    history = result.history
     assert len(history["loss"]) == 3
 
     # Stage 1 (epoch 0): Recon active, Dynamics inactive
@@ -501,11 +547,9 @@ def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None
     assert "rotation_transformer" in stage2_payload
 
     # Verify parameter state after stage 3: VAE trainable, transformers frozen
-    assert trained_model.vae.fc_mu.weight.requires_grad is True
-    assert trained_model.forward_transformer.blocks[0].fc1.weight.requires_grad is False
-    assert (
-        trained_model.rotation_transformer.blocks[0].fc1.weight.requires_grad is False
-    )
+    assert model.vae.fc_mu.weight.requires_grad is True
+    assert model.forward_transformer.blocks[0].fc1.weight.requires_grad is False
+    assert model.rotation_transformer.blocks[0].fc1.weight.requires_grad is False
 
 
 def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
@@ -554,6 +598,7 @@ def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
             "save_interval_epochs": 1,
             "vae_checkpoint": None,
             "device": "cpu",
+            "verbose": False,
         }
     )
 
@@ -567,7 +612,8 @@ def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
 
     loss_fn.forward_model = tracking_forward  # type: ignore[assignment]
 
-    train_multibranch(cfg, dataset=dataset, model=model, loss_fn=loss_fn)
+    pipeline = CurricularTrainingPipeline(cfg=cfg, loss_fn=loss_fn)
+    pipeline.fit(model=model, dataset=dataset, cfg=cfg)
 
     # 4 samples / batch_size 2 = 2 batches per epoch (epochs: 0, 1, 2)
     assert len(observed_w_latents) == 6

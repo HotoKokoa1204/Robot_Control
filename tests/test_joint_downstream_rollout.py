@@ -20,8 +20,6 @@ from typing import Dict
 from PIL import Image  # isort: skip # noqa: F401
 
 import torch
-from omegaconf import OmegaConf
-
 from agilab_lib.datasets.dual_source_dataset import DummyDualSourceVideoDataset
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.rlt import (
@@ -29,8 +27,10 @@ from agilab_lib.models.rlt import (
     ExecutionOrder,
 )
 from agilab_lib.models.vae import VAE
+from agilab_lib.training import CurricularTrainingPipeline
+from omegaconf import OmegaConf
+
 from scripts.generate_video import generate_video
-from scripts.train_multibranch import train_multibranch
 
 
 def export_test_checkpoints(
@@ -1002,7 +1002,9 @@ def test_end_to_end_three_stage_training_downstream_rollout(
         }
     )
 
-    _, history = train_multibranch(cfg, dataset=dataset, model=init_model)
+    pipeline = CurricularTrainingPipeline(cfg)
+    result = pipeline.fit(model=init_model, dataset=dataset, cfg=cfg)
+    history = result.history
     assert len(history["loss"]) == 3
 
     # Check that milestone checkpoints exist
