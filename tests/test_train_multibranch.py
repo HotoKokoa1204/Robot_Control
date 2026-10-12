@@ -17,6 +17,8 @@ from typing import Any
 from PIL import Image  # isort: skip # noqa: F401
 
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
@@ -33,7 +35,6 @@ from agilab_lib.training import (
     plot_loss_curves,
     save_all_checkpoints,
 )
-from omegaconf import DictConfig, OmegaConf
 
 
 def test_config_loading() -> None:

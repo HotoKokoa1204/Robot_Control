@@ -16,6 +16,8 @@ if SRC_DIR not in sys.path:
 
 from PIL import Image  # isort: skip # noqa: F401
 import hydra
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.datasets.dual_source_dataset import (
     DualSourceVideoDataset,
     DummyDualSourceVideoDataset,
@@ -23,7 +25,6 @@ from agilab_lib.datasets.dual_source_dataset import (
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.training import CurricularTrainingPipeline
 from agilab_lib.utils.storage import resolve_project_path
-from omegaconf import DictConfig, OmegaConf
 
 
 @hydra.main(
