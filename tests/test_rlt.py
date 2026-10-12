@@ -14,11 +14,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import TensorDataset
+
 from agilab_lib.models.rlt import (
     ConditionedResidualBlock,
     ResidualLatentTransformer,
 )
-from torch.utils.data import TensorDataset
 
 
 class DummyLatentPairDataset:
@@ -447,17 +448,17 @@ def test_rlt_gradient_flow_non_zero_motion() -> None:
 
     for i, blk in enumerate(model.blocks):
         assert blk.fc1.weight.grad is not None, f"Block {i} fc1 weight grad is None"
-        assert torch.any(
-            blk.fc1.weight.grad != 0.0
-        ), f"Block {i} fc1 weight grad is zero"
+        assert torch.any(blk.fc1.weight.grad != 0.0), (
+            f"Block {i} fc1 weight grad is zero"
+        )
         assert blk.fc2.weight.grad is not None, f"Block {i} fc2 weight grad is None"
-        assert torch.any(
-            blk.fc2.weight.grad != 0.0
-        ), f"Block {i} fc2 weight grad is zero"
+        assert torch.any(blk.fc2.weight.grad != 0.0), (
+            f"Block {i} fc2 weight grad is zero"
+        )
         assert blk.fc3.weight.grad is not None, f"Block {i} fc3 weight grad is None"
-        assert torch.any(
-            blk.fc3.weight.grad != 0.0
-        ), f"Block {i} fc3 weight grad is zero"
+        assert torch.any(blk.fc3.weight.grad != 0.0), (
+            f"Block {i} fc3 weight grad is zero"
+        )
 
 
 def test_rlt_pure_rotation_shape() -> None:

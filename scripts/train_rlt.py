@@ -15,6 +15,9 @@ import hydra
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader, Dataset, TensorDataset
+
 from agilab_lib.models.rlt import (
     ForwardLatentTransformer,
     ResidualLatentTransformer,
@@ -25,8 +28,6 @@ from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 
 class DummyLatentPairDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):

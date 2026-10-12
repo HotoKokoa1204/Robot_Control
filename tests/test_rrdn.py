@@ -4,6 +4,7 @@ from typing import Tuple
 
 import pytest
 import torch
+
 from agilab_lib.models.rrdn import (
     RRDN,
     SimpleDiscriminator,

@@ -21,13 +21,14 @@ if SRC_DIR not in sys.path:
 import cv2
 import hydra
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
 
 
 def load_video_frames(

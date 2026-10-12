@@ -12,6 +12,7 @@ from typing import List
 import cv2
 import numpy as np
 import torch
+
 from agilab_lib.models.vae import VAE, vae_loss
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 
