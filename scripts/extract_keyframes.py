@@ -19,6 +19,8 @@ if SRC_DIR not in sys.path:
 
 import hydra
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
@@ -29,7 +31,6 @@ from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
 
 
 def extract_keyframes(cfg: DictConfig) -> Path:
