@@ -5,7 +5,6 @@ Date: 2026-09-29
 Description: Paired video datasets for concurrent straight and rotation dynamics.
 """
 
-import math
 import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -15,6 +14,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from agilab_lib.datasets.motion_indexing import MotionPairSampler
 from agilab_lib.utils.storage import resolve_project_path
 
 try:
@@ -213,32 +213,20 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
         self.video_fps = float(video_fps)
         self.straight_video_speed_mps = float(straight_video_speed_mps)
 
-        if step_distance_meters is not None:
-            self.step_distance_meters = float(step_distance_meters)
-        else:
-            self.step_distance_meters = self.straight_video_speed_mps / max(
-                self.video_fps, 1.0
-            )
-
-        if buffer_frames is not None:
-            self.buffer_frames = max(0, int(buffer_frames))
-            self.buffer_distance_meters = self.buffer_frames * self.step_distance_meters
-        elif buffer_distance_meters is not None and buffer_distance_meters > 0:
-            self.buffer_distance_meters = float(buffer_distance_meters)
-            self.buffer_frames = int(
-                self.buffer_distance_meters / self.step_distance_meters
-            )
-        else:
-            self.buffer_distance_meters = (
-                float(buffer_distance_meters)
-                if buffer_distance_meters is not None
-                else 0.0
-            )
-            self.buffer_frames = 0
-
-        self.max_rotation_deg = (
-            float(max_rotation_deg) if max_rotation_deg is not None else None
+        self.motion_sampler = MotionPairSampler(
+            video_fps=self.video_fps,
+            straight_video_speed_mps=self.straight_video_speed_mps,
+            step_distance_meters=step_distance_meters,
+            buffer_distance_meters=buffer_distance_meters,
+            buffer_frames=buffer_frames,
+            max_rotation_deg=max_rotation_deg,
         )
+        self.straight_indexer = self.motion_sampler.straight_indexer
+        self.rotation_indexer = self.motion_sampler.rotation_indexer
+        self.step_distance_meters = self.motion_sampler.step_distance_meters
+        self.buffer_frames = self.motion_sampler.buffer_frames
+        self.buffer_distance_meters = self.motion_sampler.buffer_distance_meters
+        self.max_rotation_deg = self.motion_sampler.max_rotation_deg
         self.seed = seed
         self._rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -276,7 +264,9 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
                 generator=torch_gen,
                 dtype=torch.float32,
             )
-            dist_val = gen_rng.uniform(self.min_distance, self.max_distance)
+            dist_val = self.motion_sampler.sample_synthetic_distance(
+                self.min_distance, self.max_distance, gen_rng
+            )
             rot_current = torch.rand(
                 3,
                 self.img_height,
@@ -291,11 +281,9 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
                 generator=torch_gen,
                 dtype=torch.float32,
             )
-            if self.max_rotation_deg is not None:
-                max_rad = math.radians(float(self.max_rotation_deg))
-                angle_rad = gen_rng.uniform(-max_rad, max_rad)
-            else:
-                angle_rad = gen_rng.uniform(-math.pi, math.pi)
+            _angle_rad, (s_val, c_val) = self.motion_sampler.sample_synthetic_heading(
+                gen_rng
+            )
             use_fwd = gen_rng.random() < 0.5
         else:
             fwd_current = torch.rand(
@@ -304,24 +292,22 @@ class DummyDualSourceVideoDataset(Dataset[DualSourceBatch]):
             fwd_target = torch.rand(
                 3, self.img_height, self.img_width, dtype=torch.float32
             )
-            dist_val = self._rng.uniform(self.min_distance, self.max_distance)
+            dist_val = self.motion_sampler.sample_synthetic_distance(
+                self.min_distance, self.max_distance, self._rng
+            )
             rot_current = torch.rand(
                 3, self.img_height, self.img_width, dtype=torch.float32
             )
             rot_target = torch.rand(
                 3, self.img_height, self.img_width, dtype=torch.float32
             )
-            if self.max_rotation_deg is not None:
-                max_rad = math.radians(float(self.max_rotation_deg))
-                angle_rad = self._rng.uniform(-max_rad, max_rad)
-            else:
-                angle_rad = self._rng.uniform(-math.pi, math.pi)
+            _angle_rad, (s_val, c_val) = self.motion_sampler.sample_synthetic_heading(
+                self._rng
+            )
             use_fwd = self._rng.random() < 0.5
 
         fwd_distance = torch.tensor([dist_val], dtype=torch.float32)
-        rot_sin_cos = torch.tensor(
-            [math.sin(angle_rad), math.cos(angle_rad)], dtype=torch.float32
-        )
+        rot_sin_cos = torch.tensor([s_val, c_val], dtype=torch.float32)
 
         if self.recon_source == "forward":
             recon_frame = fwd_current.clone()
@@ -434,39 +420,26 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
         self.recon_source = str(recon_source).lower()
         self.rotation_one_per_subfolder = bool(rotation_one_per_subfolder)
 
-        if step_distance_meters is not None:
-            self.step_distance_meters = float(step_distance_meters)
-        else:
-            self.step_distance_meters = self.straight_video_speed_mps / max(
-                self.video_fps, 1.0
-            )
-
-        if buffer_frames is not None:
-            self.buffer_frames = max(0, int(buffer_frames))
-            self.buffer_distance_meters = self.buffer_frames * self.step_distance_meters
-        elif buffer_distance_meters is not None and buffer_distance_meters > 0:
-            self.buffer_distance_meters = float(buffer_distance_meters)
-            self.buffer_frames = int(
-                self.buffer_distance_meters / self.step_distance_meters
-            )
-        else:
-            self.buffer_distance_meters = (
-                float(buffer_distance_meters)
-                if buffer_distance_meters is not None
-                else 0.0
-            )
-            self.buffer_frames = 0
-
-        self.max_forward_offset = max(1, int(max_forward_offset))
-        self.min_forward_offset = max(1, int(min_forward_offset))
-        self.max_rotation_offset = (
-            max(1, int(max_rotation_offset))
-            if max_rotation_offset is not None
-            else None
+        self.motion_sampler = MotionPairSampler(
+            video_fps=self.video_fps,
+            straight_video_speed_mps=self.straight_video_speed_mps,
+            step_distance_meters=step_distance_meters,
+            min_forward_offset=min_forward_offset,
+            max_forward_offset=max_forward_offset,
+            buffer_distance_meters=buffer_distance_meters,
+            buffer_frames=buffer_frames,
+            max_rotation_offset=max_rotation_offset,
+            max_rotation_deg=max_rotation_deg,
         )
-        self.max_rotation_deg = (
-            float(max_rotation_deg) if max_rotation_deg is not None else None
-        )
+        self.straight_indexer = self.motion_sampler.straight_indexer
+        self.rotation_indexer = self.motion_sampler.rotation_indexer
+        self.step_distance_meters = self.motion_sampler.step_distance_meters
+        self.buffer_frames = self.motion_sampler.buffer_frames
+        self.buffer_distance_meters = self.motion_sampler.buffer_distance_meters
+        self.min_forward_offset = self.motion_sampler.min_forward_offset
+        self.max_forward_offset = self.motion_sampler.max_forward_offset
+        self.max_rotation_offset = self.motion_sampler.max_rotation_offset
+        self.max_rotation_deg = self.motion_sampler.max_rotation_deg
 
         resolved_one_path = self._resolve_dir(one_path_dir)
         resolved_rotation = self._resolve_dir(rotation_dir)
@@ -516,36 +489,14 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                 if vp in self._cached_videos
                 else self._probe_video_frame_count(vp)
             )
-            if n_frames <= 1:
-                continue
-
-            s = self.buffer_frames
-            e = n_frames - self.buffer_frames
-            if e - s <= self.min_forward_offset:
-                continue
-
-            if samples_per_video is not None:
-                for _ in range(samples_per_video):
-                    if e - 1 - self.min_forward_offset < s:
-                        continue
-                    t = rng.randint(s, e - 1 - self.min_forward_offset)
-                    max_diff = min(e - 1 - t, self.max_forward_offset)
-                    if max_diff < self.min_forward_offset:
-                        continue
-                    offset = rng.randint(self.min_forward_offset, max_diff)
-                    j = t + offset
-                    dist = offset * self.step_distance_meters
-                    self.fwd_pairs.append((vp, t, j, dist))
-            else:
-                for t in range(s, e - self.min_forward_offset):
-                    for _ in range(samples_per_frame):
-                        max_diff = min(e - 1 - t, self.max_forward_offset)
-                        if max_diff < self.min_forward_offset:
-                            continue
-                        offset = rng.randint(self.min_forward_offset, max_diff)
-                        j = t + offset
-                        dist = offset * self.step_distance_meters
-                        self.fwd_pairs.append((vp, t, j, dist))
+            pairs = self.motion_sampler.sample_straight_pairs(
+                n_frames=n_frames,
+                samples_per_video=samples_per_video,
+                samples_per_frame=samples_per_frame,
+                rng=rng,
+            )
+            for t, j, dist in pairs:
+                self.fwd_pairs.append((vp, t, j, dist))
 
         # Index rotation pairs
         self.rot_pairs: List[Tuple[Path, int, int, Tuple[float, float]]] = []
@@ -555,72 +506,14 @@ class DualSourceVideoDataset(Dataset[DualSourceBatch]):
                 if vp in self._cached_videos
                 else self._probe_video_frame_count(vp)
             )
-            if n_frames <= 1:
-                continue
-
-            half_turn = n_frames // 2
-            eff_max_offset = (
-                min(self.max_rotation_offset, half_turn)
-                if self.max_rotation_offset is not None
-                else half_turn
+            pairs = self.motion_sampler.sample_rotation_pairs(
+                n_frames=n_frames,
+                samples_per_video=samples_per_video,
+                samples_per_frame=samples_per_frame,
+                rng=rng,
             )
-            if self.max_rotation_deg is not None:
-                max_deg_offset = int(
-                    math.floor(float(n_frames) * (float(self.max_rotation_deg) / 360.0))
-                )
-                eff_max_offset = min(eff_max_offset, max_deg_offset)
-            eff_max_offset = max(1, eff_max_offset)
-
-            if samples_per_video is not None:
-                for _ in range(samples_per_video):
-                    t = rng.randint(0, n_frames - 1)
-                    offset = rng.randint(-eff_max_offset, eff_max_offset)
-                    if offset == 0:
-                        offset = 1 if rng.random() < 0.5 else -1
-                    if 0 <= t + offset < n_frames:
-                        j = t + offset
-                    else:
-                        candidate_j = t - offset
-                        if 0 <= candidate_j < n_frames:
-                            j = candidate_j
-                            offset = -offset
-                        else:
-                            j = (t + offset) % n_frames
-                    angle_raw = float(offset) * (360.0 / max(float(n_frames), 1.0))
-                    angle = ((angle_raw + 180.0) % 360.0) - 180.0
-                    if (
-                        self.max_rotation_deg is not None
-                        and abs(angle) > float(self.max_rotation_deg) + 1e-4
-                    ):
-                        continue
-                    rad = angle * math.pi / 180.0
-                    sin_cos = (math.sin(rad), math.cos(rad))
-                    self.rot_pairs.append((vp, t, j, sin_cos))
-            else:
-                for t in range(n_frames):
-                    for _ in range(samples_per_frame):
-                        offset = rng.randint(-eff_max_offset, eff_max_offset)
-                        if offset == 0:
-                            offset = 1 if rng.random() < 0.5 else -1
-                        if 0 <= t + offset < n_frames:
-                            j = t + offset
-                        else:
-                            candidate_j = t - offset
-                            if 0 <= candidate_j < n_frames:
-                                j = candidate_j
-                                offset = -offset
-                            else:
-                                j = (t + offset) % n_frames
-                        angle_raw = float(offset) * (360.0 / max(float(n_frames), 1.0))
-                        angle = ((angle_raw + 180.0) % 360.0) - 180.0
-                        if (
-                            self.max_rotation_deg is not None
-                            and abs(angle) > float(self.max_rotation_deg) + 1e-4
-                        ):
-                            continue
-                        rad = angle * math.pi / 180.0
-                        sin_cos = (math.sin(rad), math.cos(rad))
-                        self.rot_pairs.append((vp, t, j, sin_cos))
+            for t, j, sin_cos in pairs:
+                self.rot_pairs.append((vp, t, j, sin_cos))
 
         if not self.fwd_pairs:
             raise ValueError(
