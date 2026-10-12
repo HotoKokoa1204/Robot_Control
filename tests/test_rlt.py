@@ -7,23 +7,316 @@ Description: Unit tests for Residual Latent Transformer and latent datasets.
 """
 
 import math
+import random
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
-
-from agilab_lib.datasets.latent_dataset import (
-    AngleDataset,
-    CachedLatentDataset,
-    DummyLatentHorizonDataset,
-    DummyLatentPairDataset,
-    InMemoryLatentOffsetDataset,
-)
 from agilab_lib.models.rlt import (
     ConditionedResidualBlock,
     ResidualLatentTransformer,
 )
+from torch.utils.data import TensorDataset
+
+
+class DummyLatentPairDataset:
+    """Mock latent pair dataset for unit tests."""
+
+    def __init__(
+        self,
+        num_samples: int = 32,
+        latent_dim: int = 128,
+        return_sin_cos: bool = False,
+    ) -> None:
+        """Initialize mock dataset.
+
+        Args:
+            num_samples: Number of sample pairs.
+            latent_dim: Dimension of latent vectors.
+            return_sin_cos: Whether to return 2D sin/cos vector.
+        """
+        self.num_samples = num_samples
+        self.latent_dim = latent_dim
+        self.return_sin_cos = return_sin_cos
+
+    def __len__(self) -> int:
+        """Return sample count."""
+        return self.num_samples
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Generate random pair and target."""
+        z_i = torch.randn(self.latent_dim, dtype=torch.float32)
+        z_j = torch.randn(self.latent_dim, dtype=torch.float32)
+        angle_deg = random.uniform(-180.0, 180.0)
+        if self.return_sin_cos:
+            rad = angle_deg * math.pi / 180.0
+            target = torch.tensor([math.sin(rad), math.cos(rad)], dtype=torch.float32)
+        else:
+            target = torch.tensor([angle_deg], dtype=torch.float32)
+        return z_i, z_j, target
+
+
+class DummyLatentHorizonDataset:
+    """Mock latent horizon dataset for unit tests."""
+
+    def __init__(
+        self,
+        num_samples: int = 20,
+        latent_dim: int = 128,
+        horizon: int = 10,
+    ) -> None:
+        """Initialize mock dataset.
+
+        Args:
+            num_samples: Number of samples.
+            latent_dim: Dimension of latent vectors.
+            horizon: Prediction horizon steps.
+        """
+        self.num_samples = num_samples
+        self.latent_dim = latent_dim
+        self.horizon = horizon
+
+    def __len__(self) -> int:
+        """Return sample count."""
+        return self.num_samples
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Generate random current and future latents."""
+        z_in = torch.randn(self.latent_dim, dtype=torch.float32)
+        z_future = torch.randn(self.horizon, self.latent_dim, dtype=torch.float32)
+        return z_in, z_future
+
+
+class AngleDataset:
+    """Mock angle dataset for unit tests."""
+
+    def __init__(
+        self,
+        latent_array: Union[np.ndarray, torch.Tensor],
+        total_frames: Optional[int] = None,
+        samples_per_frame: int = 10,
+        max_angle: float = 15.0,
+        return_sin_cos: bool = False,
+    ) -> None:
+        """Initialize mock angle dataset.
+
+        Args:
+            latent_array: Latent vector array.
+            total_frames: Total frame count.
+            samples_per_frame: Samples per base frame.
+            max_angle: Max sampling angle.
+            return_sin_cos: Whether to return sin/cos representation.
+        """
+        if isinstance(latent_array, np.ndarray):
+            self.latent_array: torch.Tensor = torch.from_numpy(latent_array).float()
+        else:
+            self.latent_array = latent_array.float()
+
+        if total_frames is None:
+            total_frames = self.latent_array.shape[0]
+
+        self.total_frames: int = total_frames
+        self.ratio: float = float(self.total_frames) / 360.0
+        self.return_sin_cos: bool = return_sin_cos
+        self.data_pairs: List[Tuple[int, float]] = []
+
+        for i in range(self.total_frames):
+            angles = np.random.uniform(
+                low=-max_angle, high=max_angle, size=samples_per_frame
+            )
+            for angle in angles:
+                self.data_pairs.append((i, float(angle)))
+
+    def __len__(self) -> int:
+        """Return sample count."""
+        return len(self.data_pairs)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Fetch sampled pair and angle target."""
+        i, angle = self.data_pairs[idx]
+        latent_i = self.latent_array[i]
+        frame_offset = int(round(angle * self.ratio))
+        j = max(0, min(self.total_frames - 1, i + frame_offset))
+        latent_j = self.latent_array[j]
+        if self.return_sin_cos:
+            rad = angle * math.pi / 180.0
+            target = torch.tensor([math.sin(rad), math.cos(rad)], dtype=torch.float32)
+        else:
+            target = torch.tensor([angle], dtype=torch.float32)
+        return latent_i, target, latent_j
+
+
+class InMemoryLatentOffsetDataset:
+    """Mock in-memory offset dataset for unit tests."""
+
+    def __init__(self) -> None:
+        """Initialize empty mock dataset."""
+        self.data_pairs_indices: List[Tuple[int, int, int]] = []
+
+    def __len__(self) -> int:
+        """Return sample count."""
+        return len(self.data_pairs_indices)
+
+
+class CachedLatentDataset:
+    """Mock cached latent dataset for unit tests."""
+
+    def __init__(
+        self,
+        cache_dir: Union[str, Path],
+        mode: str = "rotation",
+        max_frame_offset: Optional[int] = None,
+        samples_per_frame: int = 5,
+        step_distance_meters: Optional[float] = None,
+        return_sin_cos: bool = False,
+        video_fps: float = 60.0,
+        straight_video_speed_mps: float = 2.5,
+        buffer_distance_meters: Optional[float] = None,
+        buffer_frames: Optional[int] = None,
+    ) -> None:
+        """Initialize mock cached latent dataset.
+
+        Args:
+            cache_dir: Directory containing .pt files.
+            mode: Motion mode.
+            max_frame_offset: Max frame offset.
+            samples_per_frame: Samples per frame.
+            step_distance_meters: Physical step distance.
+            return_sin_cos: Whether to return sin/cos representation.
+            video_fps: Video FPS.
+            straight_video_speed_mps: Forward speed.
+            buffer_distance_meters: Buffer distance in meters.
+            buffer_frames: Buffer frames.
+        """
+        self.mode: str = mode.lower()
+        self.max_frame_offset: Optional[int] = max_frame_offset
+        self.return_sin_cos: bool = return_sin_cos
+        self.video_fps: float = float(video_fps)
+        self.straight_video_speed_mps: float = float(straight_video_speed_mps)
+
+        if step_distance_meters is not None:
+            self.step_distance_meters: float = float(step_distance_meters)
+        else:
+            self.step_distance_meters = self.straight_video_speed_mps / max(
+                self.video_fps, 1.0
+            )
+
+        if self.mode == "forward":
+            if buffer_frames is not None:
+                self.buffer_frames: int = max(0, int(buffer_frames))
+            elif buffer_distance_meters is not None and buffer_distance_meters > 0:
+                self.buffer_frames = int(
+                    buffer_distance_meters / self.step_distance_meters
+                )
+            else:
+                self.buffer_frames = 0
+        else:
+            self.buffer_frames = 0
+
+        self.records: List[Dict[str, Any]] = []
+        self.pairs: List[Tuple[int, int, int]] = []
+
+        dir_path = Path(cache_dir)
+        if dir_path.exists():
+            pt_files = sorted(dir_path.rglob("*.pt"))
+            for r_idx, pf in enumerate(pt_files):
+                rec = torch.load(pf, weights_only=False)
+                if isinstance(rec, dict) and "latents" in rec:
+                    self.records.append(rec)
+                    latents = rec["latents"]
+                    num_frames = len(latents)
+
+                    if self.mode == "forward" and self.buffer_frames > 0:
+                        buf = self.buffer_frames
+                        if num_frames <= 2 * buf:
+                            continue
+                        forward_limit = (
+                            max_frame_offset if max_frame_offset is not None else buf
+                        )
+                        start_idx = buf
+                        end_idx = num_frames - buf
+                        for i in range(start_idx, end_idx):
+                            for _ in range(samples_per_frame):
+                                max_diff = min(end_idx - 1 - i, forward_limit)
+                                if max_diff <= 0:
+                                    continue
+                                offset = random.randint(1, max_diff)
+                                j = i + offset
+                                self.pairs.append((r_idx, i, j))
+                    else:
+                        half_turn = num_frames // 2
+                        effective_offset = (
+                            half_turn
+                            if max_frame_offset is None and self.mode == "rotation"
+                            else (
+                                max_frame_offset if max_frame_offset is not None else 15
+                            )
+                        )
+                        for i in range(num_frames):
+                            for _ in range(samples_per_frame):
+                                offset = random.randint(
+                                    -effective_offset, effective_offset
+                                )
+                                if self.mode == "rotation" and max_frame_offset is None:
+                                    j = (i + offset) % num_frames
+                                else:
+                                    j = max(0, min(num_frames - 1, i + offset))
+                                self.pairs.append((r_idx, i, j))
+
+    def __len__(self) -> int:
+        """Return pair count."""
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Fetch start latent, target latent, and motion tensor."""
+        r_idx, i, j = self.pairs[idx]
+        rec = self.records[r_idx]
+        latents = rec["latents"]
+        z_i = latents[i]
+        z_j = latents[j]
+        frame_diff = j - i
+
+        if self.mode == "rotation":
+            total_frames = float(rec.get("total_frames", len(latents)))
+            angle_raw = float(frame_diff) * (360.0 / max(total_frames, 1.0))
+            angle = ((angle_raw + 180.0) % 360.0) - 180.0
+            if self.return_sin_cos:
+                rad = angle * math.pi / 180.0
+                sc = [math.sin(rad), math.cos(rad)]
+                return z_i, z_j, torch.tensor(sc, dtype=torch.float32)
+            return z_i, z_j, torch.tensor([angle], dtype=torch.float32)
+        else:
+            dist = float(frame_diff) * self.step_distance_meters
+            return z_i, z_j, torch.tensor([dist], dtype=torch.float32)
+
+    def to_tensor_dataset(self) -> TensorDataset:
+        """Convert pairs to TensorDataset."""
+        if not self.pairs:
+            dim = (
+                int(self.records[0]["latents"].shape[-1])
+                if self.records and "latents" in self.records[0]
+                else 128
+            )
+            return TensorDataset(
+                torch.empty((0, dim)),
+                torch.empty((0, dim)),
+                torch.empty((0, 2 if self.return_sin_cos else 1)),
+            )
+        z_i_list = []
+        z_j_list = []
+        motion_list = []
+        for idx in range(len(self.pairs)):
+            zi, zj, mot = self[idx]
+            z_i_list.append(zi)
+            z_j_list.append(zj)
+            motion_list.append(mot)
+        return TensorDataset(
+            torch.stack(z_i_list),
+            torch.stack(z_j_list),
+            torch.stack(motion_list),
+        )
 
 
 def test_conditioned_residual_block_shape() -> None:
@@ -154,17 +447,17 @@ def test_rlt_gradient_flow_non_zero_motion() -> None:
 
     for i, blk in enumerate(model.blocks):
         assert blk.fc1.weight.grad is not None, f"Block {i} fc1 weight grad is None"
-        assert torch.any(blk.fc1.weight.grad != 0.0), (
-            f"Block {i} fc1 weight grad is zero"
-        )
+        assert torch.any(
+            blk.fc1.weight.grad != 0.0
+        ), f"Block {i} fc1 weight grad is zero"
         assert blk.fc2.weight.grad is not None, f"Block {i} fc2 weight grad is None"
-        assert torch.any(blk.fc2.weight.grad != 0.0), (
-            f"Block {i} fc2 weight grad is zero"
-        )
+        assert torch.any(
+            blk.fc2.weight.grad != 0.0
+        ), f"Block {i} fc2 weight grad is zero"
         assert blk.fc3.weight.grad is not None, f"Block {i} fc3 weight grad is None"
-        assert torch.any(blk.fc3.weight.grad != 0.0), (
-            f"Block {i} fc3 weight grad is zero"
-        )
+        assert torch.any(
+            blk.fc3.weight.grad != 0.0
+        ), f"Block {i} fc3 weight grad is zero"
 
 
 def test_rlt_pure_rotation_shape() -> None:

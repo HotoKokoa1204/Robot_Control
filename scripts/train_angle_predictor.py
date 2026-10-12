@@ -5,18 +5,14 @@ Date: 2026-09-07
 Description: Train Angle Predictor for relative robot Motion Command prediction.
 """
 
-from typing import List, Optional, Tuple
+import math
+import random
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import hydra
 import torch
 import torch.nn.functional as F
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset
-
-from agilab_lib.datasets.latent_dataset import (
-    CachedLatentDataset,
-    DummyLatentPairDataset,
-)
 from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.utils.eval_metrics import evaluate_angle_prediction_mae
@@ -24,6 +20,141 @@ from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader, Dataset, TensorDataset
+
+
+class DummyLatentPairDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+    """Mock dataset generating pairs of Latent Vectors and target angles."""
+
+    def __init__(
+        self,
+        num_samples: int = 64,
+        latent_dim: int = 128,
+        return_sin_cos: bool = True,
+    ) -> None:
+        """Initialize mock latent pair dataset.
+
+        Args:
+            num_samples: Number of sample pairs.
+            latent_dim: Dimension of latent vectors.
+            return_sin_cos: Whether to return sin/cos vector.
+        """
+        super().__init__()
+        self.num_samples = num_samples
+        self.latent_dim = latent_dim
+        self.return_sin_cos = return_sin_cos
+
+    def __len__(self) -> int:
+        """Return sample count."""
+        return self.num_samples
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Generate random pair and target."""
+        z_i = torch.randn(self.latent_dim, dtype=torch.float32)
+        z_j = torch.randn(self.latent_dim, dtype=torch.float32)
+        angle_deg = random.uniform(-180.0, 180.0)
+        if self.return_sin_cos:
+            rad = angle_deg * math.pi / 180.0
+            target = torch.tensor([math.sin(rad), math.cos(rad)], dtype=torch.float32)
+        else:
+            target = torch.tensor([angle_deg], dtype=torch.float32)
+        return z_i, z_j, target
+
+
+class CachedLatentDataset(Dataset[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+    """Dataset loading pre-extracted Latent Vector records (.pt) for angle training."""
+
+    def __init__(
+        self,
+        cache_dir: Union[str, Path],
+        mode: str = "rotation",
+        max_frame_offset: Optional[int] = None,
+        samples_per_frame: int = 5,
+        return_sin_cos: bool = True,
+    ) -> None:
+        """Initialize cached latent dataset.
+
+        Args:
+            cache_dir: Directory containing .pt files.
+            mode: Motion mode (rotation).
+            max_frame_offset: Max frame offset between paired latents.
+            samples_per_frame: Target samples per base frame.
+            return_sin_cos: Whether to return sin/cos representation.
+        """
+        super().__init__()
+        self.mode = mode.lower()
+        self.max_frame_offset = max_frame_offset
+        self.return_sin_cos = return_sin_cos
+        self.records: List[Dict[str, Any]] = []
+        self.pairs: List[Tuple[int, int, int]] = []
+
+        dir_path = Path(cache_dir)
+        if dir_path.exists():
+            pt_files = sorted(dir_path.rglob("*.pt"))
+            for r_idx, pf in enumerate(pt_files):
+                rec = torch.load(pf, weights_only=False)
+                if isinstance(rec, dict) and "latents" in rec:
+                    self.records.append(rec)
+                    latents = rec["latents"]
+                    num_frames = len(latents)
+                    half_turn = num_frames // 2
+                    effective_offset = (
+                        half_turn if max_frame_offset is None else max_frame_offset
+                    )
+                    for i in range(num_frames):
+                        for _ in range(samples_per_frame):
+                            offset = random.randint(-effective_offset, effective_offset)
+                            if max_frame_offset is None:
+                                j = (i + offset) % num_frames
+                            else:
+                                j = max(0, min(num_frames - 1, i + offset))
+                            self.pairs.append((r_idx, i, j))
+
+    def __len__(self) -> int:
+        """Return total sample pair count."""
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Fetch start latent, target latent, and target angle."""
+        r_idx, i, j = self.pairs[idx]
+        rec = self.records[r_idx]
+        latents = rec["latents"]
+        z_i = latents[i]
+        z_j = latents[j]
+        frame_diff = j - i
+        total_frames = float(rec.get("total_frames", len(latents)))
+        angle_raw = float(frame_diff) * (360.0 / max(total_frames, 1.0))
+        angle = ((angle_raw + 180.0) % 360.0) - 180.0
+        if self.return_sin_cos:
+            rad = angle * math.pi / 180.0
+            target = torch.tensor([math.sin(rad), math.cos(rad)], dtype=torch.float32)
+        else:
+            target = torch.tensor([angle], dtype=torch.float32)
+        return z_i, z_j, target
+
+    def to_tensor_dataset(self) -> TensorDataset:
+        """Convert sampled pairs into an in-memory TensorDataset."""
+        if not self.pairs:
+            dim = int(self.records[0]["latents"].shape[-1]) if self.records else 128
+            return TensorDataset(
+                torch.empty((0, dim)),
+                torch.empty((0, dim)),
+                torch.empty((0, 2 if self.return_sin_cos else 1)),
+            )
+        z_i_list = []
+        z_j_list = []
+        target_list = []
+        for idx in range(len(self.pairs)):
+            zi, zj, tgt = self[idx]
+            z_i_list.append(zi)
+            z_j_list.append(zj)
+            target_list.append(tgt)
+        return TensorDataset(
+            torch.stack(z_i_list),
+            torch.stack(z_j_list),
+            torch.stack(target_list),
+        )
 
 
 def get_dataset(
