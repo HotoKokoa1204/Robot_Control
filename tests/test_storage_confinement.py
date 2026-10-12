@@ -21,6 +21,9 @@ import numpy as np
 import pytest
 import torch
 from omegaconf import DictConfig, OmegaConf
+from scripts.extract_keyframes import extract_keyframes
+from scripts.generate_video import generate_video
+from scripts.reconstruct_video import reconstruct_video
 
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
@@ -32,9 +35,6 @@ from agilab_lib.utils.storage import (
     get_project_root,
     resolve_project_path,
 )
-from scripts.extract_keyframes import extract_keyframes
-from scripts.generate_video import generate_video
-from scripts.reconstruct_video import reconstruct_video
 
 
 def _snapshot_directory_state(directory: Path) -> Dict[str, Tuple[int, str]]:

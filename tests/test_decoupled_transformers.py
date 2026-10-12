@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn as nn
+from tests.test_rlt import CachedLatentDataset
 
 from agilab_lib.models.rlt import (
     BaseLatentTransformer,
@@ -21,7 +22,6 @@ from agilab_lib.models.rlt import (
     RotationLatentTransformer,
 )
 from agilab_lib.models.vae import VAE
-from tests.test_rlt import CachedLatentDataset
 
 
 def _init_test_weights(model: nn.Module) -> None:
