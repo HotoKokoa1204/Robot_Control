@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
     get_checkpoints_dir,
@@ -20,8 +22,6 @@ from agilab_lib.utils.storage import (
     get_project_root,
     resolve_project_path,
 )
-from omegaconf import DictConfig, OmegaConf
-
 from scripts.extract_keyframes import extract_keyframes
 from scripts.generate_video import generate_video
 from scripts.reconstruct_video import reconstruct_video
@@ -49,30 +49,30 @@ def test_all_configs_default_outputs_route_to_outputs_or_cache() -> None:
         for key in output_keys:
             if key in cfg and cfg[key] is not None:
                 val = str(cfg[key])
-                assert not val.startswith(
-                    "data/"
-                ), f"Config {yf.name} key '{key}' points to data/: {val}"
-                assert val.startswith(
-                    "outputs/"
-                ), f"Config {yf.name} key '{key}' should point to outputs/: {val}"
+                assert not val.startswith("data/"), (
+                    f"Config {yf.name} key '{key}' points to data/: {val}"
+                )
+                assert val.startswith("outputs/"), (
+                    f"Config {yf.name} key '{key}' should point to outputs/: {val}"
+                )
 
         # In extract_latents.yaml, output_dir is an output cache
         if yf.name == "extract_latents.yaml":
             out_dir = str(cfg.output_dir)
-            assert not out_dir.startswith(
-                "data/"
-            ), f"extract_latents.yaml output_dir points to data/: {out_dir}"
-            assert out_dir.startswith(
-                "outputs/"
-            ), f"extract_latents.yaml output_dir should point to outputs/: {out_dir}"
+            assert not out_dir.startswith("data/"), (
+                f"extract_latents.yaml output_dir points to data/: {out_dir}"
+            )
+            assert out_dir.startswith("outputs/"), (
+                f"extract_latents.yaml output_dir should point to outputs/: {out_dir}"
+            )
 
         # Cache keys must point inside .cache/ or outputs/
         for key in cache_keys:
             if key in cfg and cfg[key] is not None:
                 val = str(cfg[key])
-                assert not val.startswith(
-                    "data/"
-                ), f"Config {yf.name} cache key '{key}' points to data/: {val}"
+                assert not val.startswith("data/"), (
+                    f"Config {yf.name} cache key '{key}' points to data/: {val}"
+                )
                 assert val.startswith(".cache/") or val.startswith("outputs/"), (
                     f"Config {yf.name} cache key '{key}' must be under .cache/ or "
                     f"outputs/: {val}"
@@ -82,12 +82,12 @@ def test_all_configs_default_outputs_route_to_outputs_or_cache() -> None:
         for key in checkpoint_keys:
             if key in cfg and cfg[key] is not None:
                 val = str(cfg[key])
-                assert not val.startswith(
-                    "data/"
-                ), f"Config {yf.name} key '{key}' points to data/: {val}"
-                assert val.startswith(
-                    "checkpoints/"
-                ), f"Config {yf.name} key '{key}' should point to checkpoints/: {val}"
+                assert not val.startswith("data/"), (
+                    f"Config {yf.name} key '{key}' points to data/: {val}"
+                )
+                assert val.startswith("checkpoints/"), (
+                    f"Config {yf.name} key '{key}' should point to checkpoints/: {val}"
+                )
 
 
 def test_specific_config_default_paths() -> None:
