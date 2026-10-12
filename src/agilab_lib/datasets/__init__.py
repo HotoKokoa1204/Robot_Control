@@ -20,6 +20,11 @@ from agilab_lib.datasets.latent_dataset import (
     InMemoryLatentOffsetDataset,
     VideoLatentDataset,
 )
+from agilab_lib.datasets.motion_indexing import (
+    MotionPairSampler,
+    RotationPairIndexer,
+    StraightPairIndexer,
+)
 from agilab_lib.datasets.sr_dataset import (
     DummyPairedFrameDataset,
     VideoFrameDataset,
@@ -44,4 +49,7 @@ __all__ = [
     "DualSourceVideoDataset",
     "DummyDualSourceVideoDataset",
     "dual_source_collate_fn",
+    "StraightPairIndexer",
+    "RotationPairIndexer",
+    "MotionPairSampler",
 ]
