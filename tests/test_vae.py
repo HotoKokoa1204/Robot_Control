@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from agilab_lib.models.vae import VAE, vae_loss
-from agilab_lib.utils.keyframes import extract_keyframe_indices
+from agilab_lib.utils.trajectory import extract_keyframe_indices
 
 
 def test_vae_forward_and_reparameterize() -> None:

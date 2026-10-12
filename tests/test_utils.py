@@ -5,16 +5,37 @@ import pytest
 import torch
 import torch.nn as nn
 
-from agilab_lib.utils.eval_metrics import (
+from agilab_lib.utils import (
+    BatchedPCA as UtilsBatchedPCA,
+)
+from agilab_lib.utils import (
     decode_latents_to_frames,
     evaluate_angle_prediction_mae,
     evaluate_latent_prediction_mse,
-)
-from agilab_lib.utils.interpolation import (
+    extract_keyframe_indices,
     interpolate_all_frames_numpy,
     linear_interpolate_latent_sequence,
 )
-from agilab_lib.utils.pca import BatchedPCA
+from agilab_lib.utils.interpolation import (
+    interpolate_all_frames_numpy as LegacyInterpAll,
+)
+from agilab_lib.utils.interpolation import (
+    linear_interpolate_latent_sequence as LegacyLinearInterp,
+)
+from agilab_lib.utils.keyframes import (
+    extract_keyframe_indices as LegacyExtractKeyframes,
+)
+from agilab_lib.utils.pca import BatchedPCA as LegacyBatchedPCA
+from agilab_lib.utils.trajectory import BatchedPCA
+
+
+def test_backwards_compatibility_re_exports() -> None:
+    """Verify legacy utility modules cleanly re-export identical symbols."""
+    assert LegacyLinearInterp is linear_interpolate_latent_sequence
+    assert LegacyInterpAll is interpolate_all_frames_numpy
+    assert LegacyExtractKeyframes is extract_keyframe_indices
+    assert LegacyBatchedPCA is BatchedPCA
+    assert UtilsBatchedPCA is BatchedPCA
 
 
 def test_linear_interpolate_latent_sequence_tensor_shape() -> None:

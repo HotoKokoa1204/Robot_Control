@@ -31,12 +31,12 @@ from agilab_lib.models.rlt import (  # noqa: E402
 )
 from agilab_lib.models.rrdn import RRDN  # noqa: E402
 from agilab_lib.models.vae import VAE  # noqa: E402
-from agilab_lib.utils.interpolation import (  # noqa: E402
-    linear_interpolate_latent_sequence,
-)
 from agilab_lib.utils.storage import (  # noqa: E402
     ensure_writable_output_path,
     resolve_project_path,
+)
+from agilab_lib.utils.trajectory import (  # noqa: E402
+    linear_interpolate_latent_sequence,
 )
 
 

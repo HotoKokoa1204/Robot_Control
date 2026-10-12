@@ -24,11 +24,11 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 
 from agilab_lib.models.vae import VAE
-from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
+from agilab_lib.utils.trajectory import extract_keyframe_indices
 
 
 def load_video_frames(
