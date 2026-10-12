@@ -18,3 +18,10 @@ batch_size: 32
 
 # Output cache directory
 output_dir: "outputs/latents"
+
+# Hydra execution log confinement
+hydra:
+  run:
+    dir: "outputs/logs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+  sweep:
+    dir: "outputs/logs/hydra/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}"

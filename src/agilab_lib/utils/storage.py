@@ -100,6 +100,78 @@ def get_outputs_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     return _get_project_subdir("outputs", subdir)
 
 
+def get_eval_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
+    """Get the canonical outputs/eval directory or a subdirectory within it.
+
+    Args:
+        subdir: Optional subdirectory path or name inside outputs/eval.
+
+    Returns:
+        Absolute Path to the canonical eval directory or subdirectory.
+    """
+    return _get_project_subdir("outputs/eval", subdir)
+
+
+def get_samples_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
+    """Get the canonical outputs/samples directory or a subdirectory within it.
+
+    Args:
+        subdir: Optional subdirectory path or name inside outputs/samples.
+
+    Returns:
+        Absolute Path to the canonical samples directory or subdirectory.
+    """
+    return _get_project_subdir("outputs/samples", subdir)
+
+
+def get_keyframes_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
+    """Get the canonical outputs/keyframes directory or a subdirectory within it.
+
+    Args:
+        subdir: Optional subdirectory path or name inside outputs/keyframes.
+
+    Returns:
+        Absolute Path to the canonical keyframes directory or subdirectory.
+    """
+    return _get_project_subdir("outputs/keyframes", subdir)
+
+
+def get_latents_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
+    """Get the canonical outputs/latents directory or a subdirectory within it.
+
+    Args:
+        subdir: Optional subdirectory path or name inside outputs/latents.
+
+    Returns:
+        Absolute Path to the canonical latents directory or subdirectory.
+    """
+    return _get_project_subdir("outputs/latents", subdir)
+
+
+def get_plots_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
+    """Get the canonical outputs/plots directory or a subdirectory within it.
+
+    Args:
+        subdir: Optional subdirectory path or name inside outputs/plots.
+
+    Returns:
+        Absolute Path to the canonical plots directory or subdirectory.
+    """
+    return _get_project_subdir("outputs/plots", subdir)
+
+
+def get_logs_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
+    """Get the canonical outputs/logs directory or a subdirectory within it.
+
+    Args:
+        subdir: Optional subdirectory path or name inside outputs/logs.
+
+    Returns:
+        Absolute Path to the canonical logs directory or subdirectory.
+    """
+    return _get_project_subdir("outputs/logs", subdir)
+
+
 def get_checkpoints_dir(subdir: Optional[Union[str, Path]] = None) -> Path:
     """Get the canonical checkpoints directory or a subdirectory within it.
 

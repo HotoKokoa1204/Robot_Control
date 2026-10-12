@@ -8,7 +8,6 @@ Description: Unit tests for canonical project root and storage path resolution s
 from pathlib import Path
 
 import pytest
-
 from agilab_lib.datasets.dual_source_dataset import DualSourceVideoDataset
 from agilab_lib.utils.storage import (
     _get_project_subdir,
@@ -16,8 +15,14 @@ from agilab_lib.utils.storage import (
     get_cache_dir,
     get_checkpoints_dir,
     get_data_dir,
+    get_eval_dir,
+    get_keyframes_dir,
+    get_latents_dir,
+    get_logs_dir,
     get_outputs_dir,
+    get_plots_dir,
     get_project_root,
+    get_samples_dir,
     resolve_project_path,
 )
 
@@ -151,6 +156,30 @@ def test_convenience_directory_helpers() -> None:
 
     assert get_cache_dir() == (root / ".cache").resolve()
     assert get_cache_dir("latents") == (root / ".cache" / "latents").resolve()
+
+
+def test_semantic_outputs_directory_helpers() -> None:
+    """Verify semantic sub-directory helpers inside outputs/."""
+    root = get_project_root()
+    outputs = root / "outputs"
+
+    assert get_eval_dir() == (outputs / "eval").resolve()
+    assert get_eval_dir("test_run") == (outputs / "eval" / "test_run").resolve()
+
+    assert get_samples_dir() == (outputs / "samples").resolve()
+    assert get_samples_dir("recon") == (outputs / "samples" / "recon").resolve()
+
+    assert get_keyframes_dir() == (outputs / "keyframes").resolve()
+    assert get_keyframes_dir("kf.json") == (outputs / "keyframes" / "kf.json").resolve()
+
+    assert get_latents_dir() == (outputs / "latents").resolve()
+    assert get_latents_dir("lat.pt") == (outputs / "latents" / "lat.pt").resolve()
+
+    assert get_plots_dir() == (outputs / "plots").resolve()
+    assert get_plots_dir("loss.png") == (outputs / "plots" / "loss.png").resolve()
+
+    assert get_logs_dir() == (outputs / "logs").resolve()
+    assert get_logs_dir("hydra") == (outputs / "logs" / "hydra").resolve()
 
 
 def test_dual_source_dataset_resolve_dir_delegation(

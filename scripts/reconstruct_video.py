@@ -5,20 +5,27 @@ Date: 2026-09-08
 Description: Evaluates VAE by encoding and decoding a real video frame-by-frame.
 """
 
+# ruff: noqa: E402
+
+import sys
 from pathlib import Path
 from typing import List, Tuple
+
+# Ensure 'src' is in sys.path when invoked directly
+SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
 import cv2
 import hydra
 import numpy as np
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
+from omegaconf import DictConfig, OmegaConf
 
 
 def build_side_by_side_frame(

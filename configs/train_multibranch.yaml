@@ -55,3 +55,10 @@ save_interval_epochs: 5
 num_workers: 0
 seed: 42
 device: null
+
+# Hydra execution log confinement
+hydra:
+  run:
+    dir: "outputs/logs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+  sweep:
+    dir: "outputs/logs/hydra/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}"

@@ -34,3 +34,10 @@ hidden_dim: null # Optional hidden dimension (defaults to 512 if latent_dim==512
 forward_num_blocks: null # Optional forward blocks (defaults to 5 if latent_dim==512 else 2)
 rotation_num_blocks: null # Optional rotation blocks (defaults to 5)
 block_inner_dim: null # Optional block inner dimension (defaults to hidden_dim)
+
+# Hydra execution log confinement
+hydra:
+  run:
+    dir: "outputs/logs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+  sweep:
+    dir: "outputs/logs/hydra/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}"

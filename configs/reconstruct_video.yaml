@@ -8,3 +8,10 @@ img_height: 108
 fps: 30
 output_video: "outputs/eval/reconstructed_eval_vae.mp4"
 sample_frames_dir: "outputs/samples/reconstructed_samples"
+
+# Hydra execution log confinement
+hydra:
+  run:
+    dir: "outputs/logs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+  sweep:
+    dir: "outputs/logs/hydra/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}"

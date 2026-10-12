@@ -6,13 +6,19 @@ Date: 2026-09-07
 Description: Keyframe extraction from video via Latent Vector distances.
 """
 
+# ruff: noqa: E402
+
 import json
+import sys
 from pathlib import Path
+
+# Ensure 'src' is in sys.path when invoked directly
+SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
 import hydra
 import torch
-from omegaconf import DictConfig, OmegaConf
-
 from agilab_lib.datasets.video_dataset import (
     DummyVideoDataset,
     VideoDataset,
@@ -23,6 +29,7 @@ from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
+from omegaconf import DictConfig, OmegaConf
 
 
 def extract_keyframes(cfg: DictConfig) -> Path:

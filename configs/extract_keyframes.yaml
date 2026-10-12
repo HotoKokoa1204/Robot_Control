@@ -13,3 +13,10 @@ use_dummy_if_missing: true # Fallback to dummy data for verification
 
 # Output configuration
 output_json: "outputs/keyframes/keyframes.json"
+
+# Hydra execution log confinement
+hydra:
+  run:
+    dir: "outputs/logs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+  sweep:
+    dir: "outputs/logs/hydra/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}"

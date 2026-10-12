@@ -21,3 +21,10 @@ return_sin_cos: false
 use_dummy_if_missing: true
 vae_checkpoint: "checkpoints/vae.pt" # Optional VAE checkpoint for inference validation
 output_checkpoint: "checkpoints/forward_transformer.pt"
+
+# Hydra execution log confinement
+hydra:
+  run:
+    dir: "outputs/logs/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+  sweep:
+    dir: "outputs/logs/hydra/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}"
