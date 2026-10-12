@@ -31,6 +31,9 @@ except ImportError:
     tqdm = None
 
 
+__all__ = ["CurricularTrainingPipeline", "TrainingResult"]
+
+
 @dataclass
 class TrainingResult:
     """Telemetry, milestones, and sanity metrics produced by CurricularTrainingPipeline.
@@ -53,7 +56,7 @@ class TrainingResult:
     sanity_metrics: Dict[str, float] = field(default_factory=dict)
 
 
-def save_all_checkpoints(
+def _save_all_checkpoints(
     model: JointNavigationModel,
     output_dir: Union[str, Path],
 ) -> Dict[str, Path]:
@@ -109,7 +112,7 @@ def save_all_checkpoints(
     }
 
 
-def plot_loss_curves(
+def _plot_loss_curves(
     history: Dict[str, List[float]],
     output_dir: Union[str, Path],
 ) -> Optional[Path]:
@@ -233,6 +236,11 @@ def plot_loss_curves(
     return plot_file
 
 
+# Internal aliases for backward compatibility within library
+save_all_checkpoints = _save_all_checkpoints
+plot_loss_curves = _plot_loss_curves
+
+
 class CurricularTrainingPipeline:
     """Encapsulated 3-stage curricular training orchestrator for model.
 
@@ -249,22 +257,9 @@ class CurricularTrainingPipeline:
             telemetry exported upon completion.
     """
 
-    def __init__(
-        self,
-        cfg: Optional[Union[DictConfig, dict]] = None,
-        loss_fn: Optional[JointNavigationLoss] = None,
-        device: Optional[Union[str, torch.device]] = None,
-    ) -> None:
-        """Initialize CurricularTrainingPipeline.
-
-        Args:
-            cfg: Optional default configuration parameters dictionary.
-            loss_fn: Optional pre-configured JointNavigationLoss instance.
-            device: Optional target device for pipeline execution.
-        """
-        self.default_cfg = cfg
-        self.loss_fn = loss_fn
-        self.default_device = device
+    def __init__(self) -> None:
+        """Initialize stateless CurricularTrainingPipeline."""
+        pass
 
     @staticmethod
     def _get_cfg_val(
@@ -295,23 +290,16 @@ class CurricularTrainingPipeline:
 
     def _resolve_device(
         self,
-        device_arg: Optional[Union[str, torch.device]],
         cfg: Optional[Union[DictConfig, dict]],
     ) -> torch.device:
-        """Resolve torch device based on explicit argument, config, or availability.
+        """Resolve torch device based on config or hardware availability.
 
         Args:
-            device_arg: Explicit device string or torch.device passed to fit().
             cfg: Configuration dictionary or DictConfig.
 
         Returns:
             Resolved torch.device instance.
         """
-        if device_arg is not None:
-            return torch.device(device_arg)
-        if self.default_device is not None:
-            return torch.device(self.default_device)
-
         device_from_cfg = self._get_cfg_val(cfg, "device", None)
         if device_from_cfg is not None:
             return torch.device(str(device_from_cfg))
@@ -461,20 +449,15 @@ class CurricularTrainingPipeline:
     def fit(
         self,
         model: JointNavigationModel,
-        dataset: Union[Dataset, DataLoader],
+        dataset: Dataset,
         cfg: Optional[Union[DictConfig, dict]] = None,
-        device: Optional[Union[str, torch.device]] = None,
-        epoch_callback: Optional[Callable[[int, int, Dict[str, float]], None]] = None,
     ) -> TrainingResult:
         """Execute end-to-end multi-branch training with three-stage curriculum.
 
         Args:
             model: JointNavigationModel instance to train.
-            dataset: Dataset yielding DualSourceBatch instances or DataLoader.
+            dataset: Dataset yielding DualSourceBatch instances.
             cfg: Configuration parameters dictionary or DictConfig.
-            device: Optional compute device string or torch.device.
-            epoch_callback: Optional callback invoked after each epoch with
-                (epoch_idx, stage_idx, metrics_dict).
 
         Returns:
             TrainingResult containing loss history, checkpoint paths, and
@@ -486,9 +469,12 @@ class CurricularTrainingPipeline:
                 raise_on_sanity_fail is True.
         """
         # 1. Merge configurations
-        active_cfg = cfg if cfg is not None else self.default_cfg
-        device_obj = self._resolve_device(device, active_cfg)
+        active_cfg = cfg if cfg is not None else {}
+        device_obj = self._resolve_device(active_cfg)
         verbose = bool(self._get_cfg_val(active_cfg, "verbose", True))
+        epoch_callback: Optional[Callable[[int, int, Dict[str, float]], None]] = (
+            self._get_cfg_val(active_cfg, "epoch_callback", None)
+        )
 
         if verbose:
             print(f"Executing CurricularTrainingPipeline on device: {device_obj}")
@@ -536,7 +522,7 @@ class CurricularTrainingPipeline:
         model.to(device_obj)
 
         # 4. Loss function instantiation
-        loss_fn = self.loss_fn
+        loss_fn = self._get_cfg_val(active_cfg, "loss_fn", None)
         if loss_fn is None:
             alpha_perc = float(self._get_cfg_val(active_cfg, "alpha_perc", 0.5))
             beta_kl = float(self._get_cfg_val(active_cfg, "beta_kl", 0.0001))
@@ -940,7 +926,7 @@ class CurricularTrainingPipeline:
                 and epoch != max_epochs - 1
             ):
                 self._save_checkpoint_bundle(model, output_dir, checkpoint_paths)
-                plot_file = plot_loss_curves(history, output_dir)
+                plot_file = _plot_loss_curves(history, output_dir)
                 if plot_file is not None:
                     checkpoint_paths["loss_curves"] = plot_file
                     checkpoint_paths["loss_curves.png"] = plot_file
@@ -949,7 +935,7 @@ class CurricularTrainingPipeline:
         if verbose:
             print("\nSaving Final Stage 3 Checkpoints and Loss Telemetry...")
         self._save_checkpoint_bundle(model, output_dir, checkpoint_paths)
-        plot_file = plot_loss_curves(history, output_dir)
+        plot_file = _plot_loss_curves(history, output_dir)
         if plot_file is not None:
             checkpoint_paths["loss_curves"] = plot_file
             checkpoint_paths["loss_curves.png"] = plot_file
@@ -974,5 +960,37 @@ class CurricularTrainingPipeline:
             output_dir: Directory path for checkpoint files.
             checkpoint_paths: In-out dictionary of saved checkpoint paths.
         """
-        saved = save_all_checkpoints(model, output_dir)
+        saved = _save_all_checkpoints(model, output_dir)
         checkpoint_paths.update(saved)
+
+    @staticmethod
+    def _save_all_checkpoints(
+        model: JointNavigationModel,
+        output_dir: Union[str, Path],
+    ) -> Dict[str, Path]:
+        """Encapsulated checkpoint saver.
+
+        Args:
+            model: JointNavigationModel instance.
+            output_dir: Directory path for checkpoint files.
+
+        Returns:
+            Dictionary mapping checkpoint keys to paths.
+        """
+        return _save_all_checkpoints(model, output_dir)
+
+    @staticmethod
+    def _plot_loss_curves(
+        history: Dict[str, List[float]],
+        output_dir: Union[str, Path],
+    ) -> Optional[Path]:
+        """Encapsulated loss curve plotter.
+
+        Args:
+            history: Loss telemetry history dictionary.
+            output_dir: Target output directory.
+
+        Returns:
+            Saved plot path or None.
+        """
+        return _plot_loss_curves(history, output_dir)

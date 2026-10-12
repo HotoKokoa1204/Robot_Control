@@ -48,7 +48,9 @@ def main(cfg: DictConfig) -> None:
     else:
         raise FileNotFoundError(f"Missing data dirs: '{p1}', '{p2}'")
 
-    CurricularTrainingPipeline(cfg).fit(model, dataset, cfg)
+    pipeline = CurricularTrainingPipeline()
+    result = pipeline.fit(model, dataset, cfg)
+    _ = result
 
 
 if __name__ == "__main__":

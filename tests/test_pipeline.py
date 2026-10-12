@@ -1,9 +1,9 @@
-"""Module: test_train_multibranch
+"""Module: test_pipeline
 Stage: Test
 Author: KafuuChino
 Date: 2026-10-12
-Description: Integration and regression tests for train_multibranch CLI driver
-    and CurricularTrainingPipeline core interface.
+Description: Integration and unit tests for CurricularTrainingPipeline, TrainingResult,
+    and the train_multibranch CLI driver.
 """
 
 import math
@@ -11,11 +11,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Tuple
 
 # Windows DLL initialization guard for PIL/torchvision
 from PIL import Image  # isort: skip # noqa: F401
 
+import pytest
 import torch
 from omegaconf import DictConfig, OmegaConf
 
@@ -32,8 +33,10 @@ from agilab_lib.models.vae import VAE
 from agilab_lib.training import (
     CurricularTrainingPipeline,
     TrainingResult,
-    plot_loss_curves,
-    save_all_checkpoints,
+)
+from agilab_lib.training.pipeline import (
+    _plot_loss_curves,
+    _save_all_checkpoints,
 )
 
 
@@ -117,9 +120,7 @@ def test_cli_driver_execution(tmp_path: Path) -> None:
 
 
 def test_cli_driver_missing_data_strict_fails(tmp_path: Path) -> None:
-    """Verify CLI driver exits with error when data dirs are missing
-    and fallback is disabled.
-    """
+    """Verify CLI driver exits with error when data dirs are missing."""
     missing_one_path = tmp_path / "missing_one_path"
     missing_360 = tmp_path / "missing_360"
     cmd = [
@@ -147,7 +148,7 @@ def test_save_all_checkpoints_export(tmp_path: Path) -> None:
         block_inner_dim=32,
     )
 
-    paths = save_all_checkpoints(model, out_dir)
+    paths = _save_all_checkpoints(model, out_dir)
 
     assert paths["composite"].exists()
     assert paths["vae"].exists()
@@ -200,10 +201,19 @@ def test_plot_loss_curves(tmp_path: Path) -> None:
         "fwd_latent": [0.0, 0.05, 0.02],
         "rot_latent": [0.0, 0.04, 0.01],
     }
-    plot_path = plot_loss_curves(history, tmp_path)
+    plot_path = _plot_loss_curves(history, tmp_path)
     assert plot_path is not None
     assert plot_path.exists()
     assert plot_path.stat().st_size > 0
+
+
+def test_training_result_dataclass_defaults() -> None:
+    """Verify default initialization and attributes of TrainingResult."""
+    result = TrainingResult()
+    assert result.history == {}
+    assert result.checkpoint_paths == {}
+    assert result.sanity_gate_passed is True
+    assert result.sanity_metrics == {}
 
 
 def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
@@ -251,7 +261,7 @@ def test_train_multibranch_loop_execution(tmp_path: Path) -> None:
         }
     )
 
-    pipeline = CurricularTrainingPipeline(cfg)
+    pipeline = CurricularTrainingPipeline()
     result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
 
     # Check telemetry keys
@@ -331,7 +341,7 @@ def test_warm_start_vae_checkpoint(tmp_path: Path) -> None:
         }
     )
 
-    pipeline = CurricularTrainingPipeline(cfg)
+    pipeline = CurricularTrainingPipeline()
     result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
     assert isinstance(result, TrainingResult)
     assert len(result.history["loss"]) == 1
@@ -385,7 +395,7 @@ def test_gradient_accumulation_and_amp(tmp_path: Path) -> None:
         }
     )
 
-    pipeline = CurricularTrainingPipeline(cfg)
+    pipeline = CurricularTrainingPipeline()
     result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
     assert not torch.allclose(
         model.forward_transformer.blocks[0].fc3.weight.cpu(),
@@ -444,7 +454,7 @@ def test_two_stage_warmup_and_sanity_gate(tmp_path: Path) -> None:
         }
     )
 
-    pipeline = CurricularTrainingPipeline(cfg)
+    pipeline = CurricularTrainingPipeline()
     result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
     history = result.history
     assert len(history["loss"]) == 4
@@ -503,7 +513,7 @@ def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None
         }
     )
 
-    pipeline = CurricularTrainingPipeline(cfg)
+    pipeline = CurricularTrainingPipeline()
     result = pipeline.fit(model=model, dataset=dataset, cfg=cfg)
     history = result.history
     assert len(history["loss"]) == 3
@@ -554,9 +564,7 @@ def test_three_stage_curricular_training_and_sanity_gate(tmp_path: Path) -> None
 
 
 def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
-    """Verify that current_w_latent is set to 0.0 in Stage 1, 1.0 in Stage 2,
-    and 0.0 in Stage 3.
-    """
+    """Verify that current_w_latent is set correctly across all 3 stages."""
     dataset = DummyDualSourceVideoDataset(
         num_samples=4,
         img_height=108,
@@ -571,39 +579,7 @@ def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
     )
 
     out_dir = tmp_path / "w_latent_test_out"
-    cfg = OmegaConf.create(
-        {
-            "latent_dim": 64,
-            "hidden_dim": 32,
-            "num_blocks": 2,
-            "block_inner_dim": 32,
-            "lr": 1e-4,
-            "lr_trans": 1e-4,
-            "lr_vae_stage1": 1e-4,
-            "lr_vae_stage3": 1e-5,
-            "batch_size": 2,
-            "gradient_accumulation_steps": 1,
-            "use_amp": False,
-            "max_epochs": 3,
-            "stage1_epochs": 1,
-            "stage2_epochs": 1,
-            "stage3_epochs": 1,
-            "w_latent": 1.0,
-            "sanity_check_min_std": 0.1,
-            "alpha_perc": 0.5,
-            "beta_kl": 0.0001,
-            "w_fwd": 1.0,
-            "w_rot": 1.0,
-            "w_recon": 1.0,
-            "output_dir": str(out_dir),
-            "save_interval_epochs": 1,
-            "vae_checkpoint": None,
-            "device": "cpu",
-            "verbose": False,
-        }
-    )
-
-    observed_w_latents = []
+    observed_w_latents: List[float] = []
     loss_fn = JointNavigationLoss()
     original_forward = loss_fn.forward_model
 
@@ -613,7 +589,38 @@ def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
 
     loss_fn.forward_model = tracking_forward  # type: ignore[assignment]
 
-    pipeline = CurricularTrainingPipeline(cfg=cfg, loss_fn=loss_fn)
+    cfg = {
+        "latent_dim": 64,
+        "hidden_dim": 32,
+        "num_blocks": 2,
+        "block_inner_dim": 32,
+        "lr": 1e-4,
+        "lr_trans": 1e-4,
+        "lr_vae_stage1": 1e-4,
+        "lr_vae_stage3": 1e-5,
+        "batch_size": 2,
+        "gradient_accumulation_steps": 1,
+        "use_amp": False,
+        "max_epochs": 3,
+        "stage1_epochs": 1,
+        "stage2_epochs": 1,
+        "stage3_epochs": 1,
+        "w_latent": 1.0,
+        "sanity_check_min_std": 0.1,
+        "alpha_perc": 0.5,
+        "beta_kl": 0.0001,
+        "w_fwd": 1.0,
+        "w_rot": 1.0,
+        "w_recon": 1.0,
+        "output_dir": str(out_dir),
+        "save_interval_epochs": 1,
+        "vae_checkpoint": None,
+        "device": "cpu",
+        "verbose": False,
+        "loss_fn": loss_fn,
+    }
+
+    pipeline = CurricularTrainingPipeline()
     pipeline.fit(model=model, dataset=dataset, cfg=cfg)
 
     # 4 samples / batch_size 2 = 2 batches per epoch (epochs: 0, 1, 2)
@@ -627,3 +634,203 @@ def test_three_stage_curricular_w_latent_schedule(tmp_path: Path) -> None:
     # Stage 3: w_latent = 0.0
     assert observed_w_latents[4] == 0.0
     assert observed_w_latents[5] == 0.0
+
+
+def test_parameter_freezing_invariants_across_stages(tmp_path: Path) -> None:
+    """Verify parameter freezing invariants across each curricular stage."""
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=4,
+        img_height=108,
+        img_width=192,
+        seed=123,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+
+    stage_records: List[Tuple[int, bool, bool, bool]] = []
+
+    def tracking_callback(
+        epoch_idx: int, stage_idx: int, metrics: Dict[str, float]
+    ) -> None:
+        vae_trainable = any(p.requires_grad for p in model.vae.parameters())
+        fwd_trainable = any(
+            p.requires_grad for p in model.forward_transformer.parameters()
+        )
+        rot_trainable = any(
+            p.requires_grad for p in model.rotation_transformer.parameters()
+        )
+        stage_records.append((stage_idx, vae_trainable, fwd_trainable, rot_trainable))
+
+    cfg = {
+        "latent_dim": 64,
+        "hidden_dim": 32,
+        "num_blocks": 2,
+        "block_inner_dim": 32,
+        "batch_size": 2,
+        "use_amp": False,
+        "max_epochs": 3,
+        "stage1_epochs": 1,
+        "stage2_epochs": 1,
+        "stage3_epochs": 1,
+        "sanity_check_min_std": 0.1,
+        "output_dir": str(tmp_path / "invariants_out"),
+        "device": "cpu",
+        "verbose": False,
+        "epoch_callback": tracking_callback,
+    }
+
+    pipeline = CurricularTrainingPipeline()
+    pipeline.fit(
+        model=model,
+        dataset=dataset,
+        cfg=cfg,
+    )
+
+    assert len(stage_records) == 3
+
+    # Stage 1: VAE is trainable, transformers are frozen
+    stage1, vae_s1, fwd_s1, rot_s1 = stage_records[0]
+    assert stage1 == 1
+    assert vae_s1 is True
+    assert fwd_s1 is False
+    assert rot_s1 is False
+
+    # Stage 2: VAE is frozen, transformers are trainable
+    stage2, vae_s2, fwd_s2, rot_s2 = stage_records[1]
+    assert stage2 == 2
+    assert vae_s2 is False
+    assert fwd_s2 is True
+    assert rot_s2 is True
+
+    # Stage 3: VAE is trainable, transformers are frozen
+    stage3, vae_s3, fwd_s3, rot_s3 = stage_records[2]
+    assert stage3 == 3
+    assert vae_s3 is True
+    assert fwd_s3 is False
+    assert rot_s3 is False
+
+
+def test_sanity_gate_failure_handling(tmp_path: Path) -> None:
+    """Verify sanity gate raises RuntimeError on failure or records flag."""
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=4,
+        img_height=108,
+        img_width=192,
+        seed=999,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+
+    out_dir = tmp_path / "sanity_fail_out"
+    strict_cfg = {
+        "max_epochs": 1,
+        "stage1_epochs": 1,
+        "stage2_epochs": 0,
+        "stage3_epochs": 0,
+        "sanity_check_min_std": 99999.0,  # Unattainable threshold
+        "raise_on_sanity_fail": True,
+        "output_dir": str(out_dir),
+        "device": "cpu",
+        "verbose": False,
+    }
+
+    pipeline = CurricularTrainingPipeline()
+
+    with pytest.raises(RuntimeError, match="Sanity Check Failed"):
+        pipeline.fit(model=model, dataset=dataset, cfg=strict_cfg)
+
+    # When raise_on_sanity_fail is False, returns sanity_gate_passed=False
+    soft_cfg = {
+        "max_epochs": 1,
+        "stage1_epochs": 1,
+        "stage2_epochs": 0,
+        "stage3_epochs": 0,
+        "sanity_check_min_std": 99999.0,
+        "raise_on_sanity_fail": False,
+        "output_dir": str(out_dir),
+        "device": "cpu",
+        "verbose": False,
+    }
+
+    result = pipeline.fit(model=model, dataset=dataset, cfg=soft_cfg)
+    assert result.sanity_gate_passed is False
+    assert result.sanity_metrics["avg_std"] < 99999.0
+
+
+def test_pipeline_with_dictconfig_and_warm_start(tmp_path: Path) -> None:
+    """Verify pipeline works with Hydra DictConfig and loads warm-start VAE weights."""
+    src_vae = VAE(latent_dim=64)
+    with torch.no_grad():
+        src_vae.fc_mu.weight.fill_(0.888)
+
+    ckpt_path = tmp_path / "warm_start_vae.pt"
+    torch.save(src_vae.state_dict(), ckpt_path)
+
+    dataset = DummyDualSourceVideoDataset(
+        num_samples=4,
+        img_height=108,
+        img_width=192,
+        seed=42,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+
+    dict_cfg: DictConfig = OmegaConf.create(
+        {
+            "latent_dim": 64,
+            "hidden_dim": 32,
+            "num_blocks": 2,
+            "block_inner_dim": 32,
+            "lr": 0.0,
+            "lr_vae_stage1": 0.0,
+            "max_epochs": 1,
+            "stage1_epochs": 1,
+            "stage2_epochs": 0,
+            "stage3_epochs": 0,
+            "sanity_check_min_std": 0.1,
+            "vae_checkpoint": str(ckpt_path),
+            "output_dir": str(tmp_path / "dict_cfg_out"),
+            "device": "cpu",
+            "verbose": False,
+        }
+    )
+
+    pipeline = CurricularTrainingPipeline()
+    result = pipeline.fit(model=model, dataset=dataset, cfg=dict_cfg)
+
+    assert isinstance(result, TrainingResult)
+    assert len(result.history["loss"]) == 1
+    # Verify VAE was warm-started
+    assert torch.allclose(
+        model.vae.fc_mu.weight, torch.full_like(model.vae.fc_mu.weight, 0.888)
+    )
+
+
+def test_empty_dataset_raises_value_error() -> None:
+    """Verify ValueError is raised when provided dataset contains 0 samples."""
+    empty_dataset = DummyDualSourceVideoDataset(
+        num_samples=0,
+        img_height=108,
+        img_width=192,
+    )
+    model = JointNavigationModel(
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+    )
+    pipeline = CurricularTrainingPipeline()
+    with pytest.raises(ValueError, match="0 samples"):
+        pipeline.fit(model=model, dataset=empty_dataset)

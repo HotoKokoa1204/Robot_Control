@@ -5,11 +5,6 @@ Date: 2026-09-07
 Description: Utility package with trajectory operations, evaluation, and storage tools.
 """
 
-from agilab_lib.utils.eval_metrics import (
-    decode_latents_to_frames,
-    evaluate_angle_prediction_mae,
-    evaluate_latent_prediction_mse,
-)
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     get_cache_dir,
@@ -27,6 +22,9 @@ from agilab_lib.utils.storage import (
 )
 from agilab_lib.utils.trajectory import (
     BatchedPCA,
+    decode_latents_to_frames,
+    evaluate_angle_prediction_mae,
+    evaluate_latent_prediction_mse,
     extract_keyframe_indices,
     interpolate_all_frames_numpy,
     linear_interpolate_latent_sequence,
