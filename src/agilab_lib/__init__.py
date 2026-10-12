@@ -10,6 +10,10 @@ from agilab_lib.models.angle_predictor import AnglePredictor
 from agilab_lib.models.rlt import ResidualLatentTransformer
 from agilab_lib.models.rrdn import RRDN
 from agilab_lib.models.vae import VAE
+from agilab_lib.training.pipeline import (
+    CurricularTrainingPipeline,
+    TrainingResult,
+)
 
 __version__ = "0.1.0"
 
@@ -18,4 +22,6 @@ __all__ = [
     "ResidualLatentTransformer",
     "RRDN",
     "AnglePredictor",
+    "CurricularTrainingPipeline",
+    "TrainingResult",
 ]
