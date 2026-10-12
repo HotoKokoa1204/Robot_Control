@@ -4,10 +4,10 @@
 mode: "rotation"
 
 # Model architecture settings
-latent_dim: 128
-hidden_dim: 128
+latent_dim: 512
+hidden_dim: 512
 num_blocks: 5
-block_inner_dim: 128
+block_inner_dim: 512
 
 # Optimization hyperparameters
 lr: 0.0005

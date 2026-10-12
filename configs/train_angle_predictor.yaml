@@ -1,10 +1,10 @@
 # @package _global_
 
 # Model architecture settings
-latent_dim: 128
+latent_dim: 512
 hidden_dims:
+  - 512
   - 256
-  - 128
 use_batch_norm: true
 
 # Optimization hyperparameters

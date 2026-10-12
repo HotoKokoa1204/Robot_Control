@@ -18,7 +18,7 @@ def vae_loss(
     x: torch.Tensor,
     mu: torch.Tensor,
     logvar: torch.Tensor,
-    beta: float = 0.001,
+    beta: float = 0.0001,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Calculates combined VAE loss (Reconstruction MSE + beta * KL divergence).
 
@@ -27,13 +27,15 @@ def vae_loss(
         x: Original input frame tensor of shape (B, 3, H, W).
         mu: Latent mean vector of shape (B, latent_dim).
         logvar: Latent log variance vector of shape (B, latent_dim).
-        beta: Weight factor for KL divergence loss term.
+        beta: Weight factor for KL divergence loss term. Defaults to 0.0001.
 
     Returns:
         Tuple of (total_loss, recon_loss, kl_loss).
     """
     recon_loss = F.mse_loss(recon_x, x, reduction="mean")
-    kl_loss = -0.5 * torch.mean(1.0 + logvar - mu.pow(2) - logvar.exp())
+    kl_loss = -0.5 * torch.mean(
+        torch.sum(1.0 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+    )
     total_loss = recon_loss + beta * kl_loss
     return total_loss, recon_loss, kl_loss
 
@@ -41,11 +43,11 @@ def vae_loss(
 class VAE(nn.Module):
     """Variational Autoencoder (VAE) for learning structured latent spaces."""
 
-    def __init__(self, latent_dim: int = 128) -> None:
+    def __init__(self, latent_dim: int = 512) -> None:
         """Initialize VAE architecture.
 
         Args:
-            latent_dim: Dimensionality of the latent representation.
+            latent_dim: Dimensionality of the latent representation. Defaults to 512.
         """
         super().__init__()
         self.latent_dim = latent_dim

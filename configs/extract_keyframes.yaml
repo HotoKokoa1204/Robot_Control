@@ -4,7 +4,7 @@
 video_path: "data/input_video.mp4"
 
 # VAE model settings
-latent_dim: 128
+latent_dim: 512
 vae_checkpoint: "" # Optional path to pretrained VAE checkpoint
 
 # Keyframe extraction settings

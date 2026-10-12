@@ -2,7 +2,7 @@
 
 # VAE model settings
 vae_checkpoint: "checkpoints/vae.pt"
-latent_dim: 128
+latent_dim: 512
 
 # Source videos settings
 data_root: "data"

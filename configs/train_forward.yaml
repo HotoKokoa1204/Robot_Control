@@ -3,11 +3,11 @@
 # Training mode: "forward"
 mode: "forward"
 
-# Model architecture settings: lightweight 2 residual blocks
-latent_dim: 128
-hidden_dim: 128
-num_blocks: 2
-block_inner_dim: 128
+# Model architecture settings
+latent_dim: 512
+hidden_dim: 512
+num_blocks: 5
+block_inner_dim: 512
 
 # Optimization hyperparameters
 lr: 0.0005
