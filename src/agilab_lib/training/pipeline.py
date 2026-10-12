@@ -53,6 +53,62 @@ class TrainingResult:
     sanity_metrics: Dict[str, float] = field(default_factory=dict)
 
 
+def save_all_checkpoints(
+    model: JointNavigationModel,
+    output_dir: Union[str, Path],
+) -> Dict[str, Path]:
+    """Save composite and exported standalone component weights to output directory.
+
+    Saves:
+        - joint_navigation_model.pt (Full composite model)
+        - final_joint_model.pt (Alias for composite model)
+        - vae_512.pt (Standalone VAE)
+        - forward_transformer.pt (Standalone forward transformer)
+        - rotation_transformer.pt (Standalone rotation transformer)
+
+    Args:
+        model: JointNavigationModel instance.
+        output_dir: Directory path for checkpoint files.
+
+    Returns:
+        Dictionary mapping component keys ('composite', 'vae', 'forward',
+        'rotation', etc.) to saved checkpoint file paths.
+    """
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    composite_path = out_path / "joint_navigation_model.pt"
+    torch.save(model.state_dict(), composite_path)
+
+    final_joint_path = out_path / "final_joint_model.pt"
+    torch.save(model.state_dict(), final_joint_path)
+
+    vae_path = out_path / "vae_512.pt"
+    model.export_vae_checkpoint(vae_path)
+
+    fwd_path = out_path / "forward_transformer.pt"
+    model.export_forward_checkpoint(fwd_path)
+
+    rot_path = out_path / "rotation_transformer.pt"
+    model.export_rotation_checkpoint(rot_path)
+
+    return {
+        "composite": composite_path,
+        "joint_navigation_model": composite_path,
+        "joint_navigation_model.pt": composite_path,
+        "final_joint_model": final_joint_path,
+        "final_joint_model.pt": final_joint_path,
+        "vae": vae_path,
+        "vae_512.pt": vae_path,
+        "forward": fwd_path,
+        "forward_transformer": fwd_path,
+        "forward_transformer.pt": fwd_path,
+        "rotation": rot_path,
+        "rotation_transformer": rot_path,
+        "rotation_transformer.pt": rot_path,
+    }
+
+
 def plot_loss_curves(
     history: Dict[str, List[float]],
     output_dir: Union[str, Path],
@@ -918,33 +974,5 @@ class CurricularTrainingPipeline:
             output_dir: Directory path for checkpoint files.
             checkpoint_paths: In-out dictionary of saved checkpoint paths.
         """
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        composite_path = output_dir / "joint_navigation_model.pt"
-        torch.save(model.state_dict(), composite_path)
-
-        final_joint_path = output_dir / "final_joint_model.pt"
-        torch.save(model.state_dict(), final_joint_path)
-
-        vae_path = output_dir / "vae_512.pt"
-        model.export_vae_checkpoint(vae_path)
-
-        fwd_path = output_dir / "forward_transformer.pt"
-        model.export_forward_checkpoint(fwd_path)
-
-        rot_path = output_dir / "rotation_transformer.pt"
-        model.export_rotation_checkpoint(rot_path)
-
-        checkpoint_paths["composite"] = composite_path
-        checkpoint_paths["joint_navigation_model"] = composite_path
-        checkpoint_paths["joint_navigation_model.pt"] = composite_path
-        checkpoint_paths["final_joint_model"] = final_joint_path
-        checkpoint_paths["final_joint_model.pt"] = final_joint_path
-        checkpoint_paths["vae"] = vae_path
-        checkpoint_paths["vae_512.pt"] = vae_path
-        checkpoint_paths["forward"] = fwd_path
-        checkpoint_paths["forward_transformer"] = fwd_path
-        checkpoint_paths["forward_transformer.pt"] = fwd_path
-        checkpoint_paths["rotation"] = rot_path
-        checkpoint_paths["rotation_transformer"] = rot_path
-        checkpoint_paths["rotation_transformer.pt"] = rot_path
+        saved = save_all_checkpoints(model, output_dir)
+        checkpoint_paths.update(saved)

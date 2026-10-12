@@ -13,6 +13,8 @@ from agilab_lib.models.vae import VAE
 from agilab_lib.training.pipeline import (
     CurricularTrainingPipeline,
     TrainingResult,
+    plot_loss_curves,
+    save_all_checkpoints,
 )
 
 __version__ = "0.1.0"
@@ -24,4 +26,6 @@ __all__ = [
     "AnglePredictor",
     "CurricularTrainingPipeline",
     "TrainingResult",
+    "plot_loss_curves",
+    "save_all_checkpoints",
 ]
