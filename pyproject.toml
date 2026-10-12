@@ -29,6 +29,7 @@ where = ["src"]
 
 [tool.ruff]
 target-version = "py38"
+src = ["src"]
 # Enable standard rules
 lint.select = ["E", "F", "W", "I", "N"]
 lint.ignore = ["N812"]

@@ -2,7 +2,7 @@
 Stage: Library
 Author: KafuuChino
 Date: 2026-09-07
-Description: Utility package with interpolation, evaluation, PCA, and storage tools.
+Description: Utility package with trajectory operations, evaluation, and storage tools.
 """
 
 from agilab_lib.utils.eval_metrics import (
@@ -10,12 +10,6 @@ from agilab_lib.utils.eval_metrics import (
     evaluate_angle_prediction_mae,
     evaluate_latent_prediction_mse,
 )
-from agilab_lib.utils.interpolation import (
-    interpolate_all_frames_numpy,
-    linear_interpolate_latent_sequence,
-)
-from agilab_lib.utils.keyframes import extract_keyframe_indices
-from agilab_lib.utils.pca import BatchedPCA
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     get_cache_dir,
@@ -30,6 +24,12 @@ from agilab_lib.utils.storage import (
     get_project_root,
     get_samples_dir,
     resolve_project_path,
+)
+from agilab_lib.utils.trajectory import (
+    BatchedPCA,
+    extract_keyframe_indices,
+    interpolate_all_frames_numpy,
+    linear_interpolate_latent_sequence,
 )
 
 __all__ = [
