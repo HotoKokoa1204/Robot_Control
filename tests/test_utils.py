@@ -16,6 +16,15 @@ from agilab_lib.utils import (
     interpolate_all_frames_numpy,
     linear_interpolate_latent_sequence,
 )
+from agilab_lib.utils.eval_metrics import (
+    decode_latents_to_frames as ShimDecode,
+)
+from agilab_lib.utils.eval_metrics import (
+    evaluate_angle_prediction_mae as ShimAngleMae,
+)
+from agilab_lib.utils.eval_metrics import (
+    evaluate_latent_prediction_mse as ShimLatentMse,
+)
 from agilab_lib.utils.interpolation import (
     interpolate_all_frames_numpy as LegacyInterpAll,
 )
@@ -36,6 +45,9 @@ def test_backwards_compatibility_re_exports() -> None:
     assert LegacyExtractKeyframes is extract_keyframe_indices
     assert LegacyBatchedPCA is BatchedPCA
     assert UtilsBatchedPCA is BatchedPCA
+    assert ShimDecode is decode_latents_to_frames
+    assert ShimAngleMae is evaluate_angle_prediction_mae
+    assert ShimLatentMse is evaluate_latent_prediction_mse
 
 
 def test_linear_interpolate_latent_sequence_tensor_shape() -> None:

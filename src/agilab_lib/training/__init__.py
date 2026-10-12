@@ -8,13 +8,9 @@ Description: Curricular training pipeline modules for AGILAB Visual Navigation S
 from agilab_lib.training.pipeline import (
     CurricularTrainingPipeline,
     TrainingResult,
-    plot_loss_curves,
-    save_all_checkpoints,
 )
 
 __all__ = [
     "CurricularTrainingPipeline",
     "TrainingResult",
-    "plot_loss_curves",
-    "save_all_checkpoints",
 ]

@@ -1002,7 +1002,7 @@ def test_end_to_end_three_stage_training_downstream_rollout(
         }
     )
 
-    pipeline = CurricularTrainingPipeline(cfg)
+    pipeline = CurricularTrainingPipeline()
     result = pipeline.fit(model=init_model, dataset=dataset, cfg=cfg)
     history = result.history
     assert len(history["loss"]) == 3
