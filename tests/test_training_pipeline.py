@@ -12,13 +12,14 @@ from typing import Dict, List, Tuple
 
 import pytest
 import torch
+from omegaconf import DictConfig, OmegaConf
+
 from agilab_lib import CurricularTrainingPipeline, TrainingResult
 from agilab_lib.datasets.dual_source_dataset import (
     DummyDualSourceVideoDataset,
 )
 from agilab_lib.models.joint_navigation import JointNavigationModel
 from agilab_lib.models.vae import VAE
-from omegaconf import DictConfig, OmegaConf
 
 
 def test_training_result_dataclass_defaults() -> None:
