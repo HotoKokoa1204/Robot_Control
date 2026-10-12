@@ -11,26 +11,59 @@ Description: Keyframe extraction from video via Latent Vector distances.
 import json
 import sys
 from pathlib import Path
+from typing import List
 
 # Ensure 'src' is in sys.path when invoked directly
 SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
+import cv2
 import hydra
 import torch
-from omegaconf import DictConfig, OmegaConf
-
-from agilab_lib.datasets.video_dataset import (
-    DummyVideoDataset,
-    VideoDataset,
-)
 from agilab_lib.models.vae import VAE
 from agilab_lib.utils.keyframes import extract_keyframe_indices
 from agilab_lib.utils.storage import (
     ensure_writable_output_path,
     resolve_project_path,
 )
+from omegaconf import DictConfig, OmegaConf
+
+
+def load_video_frames(
+    video_path: Path,
+    img_height: int = 108,
+    img_width: int = 192,
+) -> List[torch.Tensor]:
+    """Read, resize, and normalize frames from a video file into tensors.
+
+    Args:
+        video_path: Path to target video file.
+        img_height: Desired frame height.
+        img_width: Desired frame width.
+
+    Returns:
+        List of normalized frame tensors of shape (3, H, W).
+
+    Raises:
+        ValueError: If the video file cannot be opened.
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise ValueError(f"Unable to open video file: {video_path}")
+    frames: List[torch.Tensor] = []
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    for _ in range(total_frames):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_resized = cv2.resize(frame, (img_width, img_height))
+        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+        frame_normalized = frame_rgb.astype("float32") / 255.0
+        frame_tensor = torch.from_numpy(frame_normalized).permute(2, 0, 1).contiguous()
+        frames.append(frame_tensor)
+    cap.release()
+    return frames
 
 
 def extract_keyframes(cfg: DictConfig) -> Path:
@@ -62,15 +95,14 @@ def extract_keyframes(cfg: DictConfig) -> Path:
 
     video_path = resolve_project_path(str(cfg.video_path))
     if video_path.exists():
-        dataset = VideoDataset(video_path)
-        print(f"Loaded real video from {video_path} with {len(dataset)} frames.")
+        frames = load_video_frames(video_path)
+        print(f"Loaded real video from {video_path} with {len(frames)} frames.")
     elif cfg.use_dummy_if_missing:
-        dataset = DummyVideoDataset(num_frames=30)
-        print(f"Video file not found. Using dummy dataset with {len(dataset)} frames.")
+        frames = [torch.rand(3, 108, 192, dtype=torch.float32) for _ in range(30)]
+        print(f"Video file not found. Using dummy dataset with {len(frames)} frames.")
     else:
         raise FileNotFoundError(f"Video file not found at: {video_path}")
 
-    frames = [dataset[i] for i in range(len(dataset))]
     keyframe_indices = extract_keyframe_indices(
         vae=vae,
         frames=frames,

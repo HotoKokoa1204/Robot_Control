@@ -1,13 +1,22 @@
-"""Unit tests for RRDN, discriminator, and super-resolution datasets."""
+"""Unit tests for RRDN, discriminator, and super-resolution models."""
 
+from typing import Tuple
+
+import pytest
 import torch
-
-from agilab_lib.datasets.sr_dataset import DummyPairedFrameDataset
 from agilab_lib.models.rrdn import (
     RRDN,
     SimpleDiscriminator,
     sobel_edge_detection,
 )
+
+
+@pytest.fixture
+def paired_frame_tensors() -> Tuple[torch.Tensor, torch.Tensor]:
+    """Provide synthetic paired low-resolution and high-resolution tensors."""
+    lr = torch.rand(3, 27, 48, dtype=torch.float32)
+    hr = torch.rand(3, 54, 96, dtype=torch.float32)
+    return lr, hr
 
 
 def test_rrdn_forward_upscale_shapes() -> None:
@@ -43,12 +52,10 @@ def test_sobel_edge_detection_shape() -> None:
     assert edge.shape == (2, 1, 54, 96)
 
 
-def test_dummy_paired_frame_dataset_shapes() -> None:
-    """Test DummyPairedFrameDataset length and output tensor dimensions."""
-    dataset = DummyPairedFrameDataset(
-        num_samples=6, lr_shape=(3, 27, 48), hr_shape=(3, 54, 96)
-    )
-    assert len(dataset) == 6
-    lr, hr = dataset[0]
+def test_paired_frame_tensors_shapes(
+    paired_frame_tensors: Tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    """Test paired frame synthetic tensor dimensions."""
+    lr, hr = paired_frame_tensors
     assert lr.shape == (3, 27, 48)
     assert hr.shape == (3, 54, 96)

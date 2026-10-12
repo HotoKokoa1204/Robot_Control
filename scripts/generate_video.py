@@ -25,10 +25,6 @@ SRC_DIR = str(Path(__file__).resolve().parent.parent / "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from agilab_lib.datasets.video_dataset import (  # noqa: E402
-    DummyVideoDataset,
-    VideoDataset,
-)
 from agilab_lib.models.rlt import (  # noqa: E402
     ChainedLatentTransformer,
     ExecutionOrder,
@@ -67,6 +63,42 @@ def render_frames_to_video(
     for frame in frames:
         writer.write(frame)
     writer.release()
+
+
+def load_video_frames(
+    video_path: Path,
+    img_height: int = 108,
+    img_width: int = 192,
+) -> List[torch.Tensor]:
+    """Read, resize, and normalize frames from a video file into tensors.
+
+    Args:
+        video_path: Path to target video file.
+        img_height: Desired frame height.
+        img_width: Desired frame width.
+
+    Returns:
+        List of normalized frame tensors of shape (3, H, W).
+
+    Raises:
+        ValueError: If the video file cannot be opened.
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise ValueError(f"Unable to open video file: {video_path}")
+    frames: List[torch.Tensor] = []
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    for _ in range(total_frames):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_resized = cv2.resize(frame, (img_width, img_height))
+        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+        frame_normalized = frame_rgb.astype("float32") / 255.0
+        frame_tensor = torch.from_numpy(frame_normalized).permute(2, 0, 1).contiguous()
+        frames.append(frame_tensor)
+    cap.release()
+    return frames
 
 
 def generate_video(cfg: DictConfig) -> str:
@@ -116,14 +148,14 @@ def generate_video(cfg: DictConfig) -> str:
             print(f"Loaded VAE checkpoint: {vae_ckpt_path}")
     vae.eval()
 
-    # 2. Load dataset
+    # 2. Load frames
     video_path = resolve_project_path(str(cfg.video_path))
     if video_path.exists():
-        dataset = VideoDataset(video_path)
-        print(f"Loaded real video with {len(dataset)} frames.")
+        frames = load_video_frames(video_path)
+        print(f"Loaded real video with {len(frames)} frames.")
     elif cfg.use_dummy_if_missing:
-        dataset = DummyVideoDataset(num_frames=30)
-        print(f"Video file missing. Using DummyVideoDataset ({len(dataset)} frames).")
+        frames = [torch.rand(3, 108, 192, dtype=torch.float32) for _ in range(30)]
+        print(f"Video file missing. Using dummy frames ({len(frames)} frames).")
     else:
         raise FileNotFoundError(f"Video file not found at {video_path}")
 
@@ -136,18 +168,18 @@ def generate_video(cfg: DictConfig) -> str:
             keyframe_indices = data.get("keyframe_indices", [])
         print(f"Loaded {len(keyframe_indices)} keyframes from {kf_path}")
     elif cfg.use_dummy_if_missing:
-        keyframe_indices = [0, min(10, len(dataset) - 1), len(dataset) - 1]
+        keyframe_indices = [0, min(10, len(frames) - 1), len(frames) - 1]
         print(f"Keyframe JSON missing. Using default indices: {keyframe_indices}")
     else:
         raise FileNotFoundError(f"Keyframe JSON not found at: {kf_path}")
 
     # Filter valid keyframe indices
-    valid_indices = [idx for idx in keyframe_indices if idx < len(dataset)]
+    valid_indices = [idx for idx in keyframe_indices if idx < len(frames)]
     if not valid_indices:
         valid_indices = [0]
 
     # 4. Extract and encode Keyframes into Latent Vectors
-    keyframe_tensors = [dataset[idx] for idx in valid_indices]
+    keyframe_tensors = [frames[idx] for idx in valid_indices]
     with torch.no_grad():
         batch_kf = torch.stack(keyframe_tensors, dim=0).to(device)
         keyframe_latents = vae.get_latent(batch_kf)
