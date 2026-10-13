@@ -18,18 +18,26 @@ from agilab_lib.utils.trajectory import extract_keyframe_indices
 
 
 def test_vae_forward_and_reparameterize() -> None:
-    """Test VAE forward pass and latent dimension shapes."""
-    vae = VAE(latent_dim=128)
+    """Test VAE forward pass and latent dimension shapes in both modes."""
+    # 1. Variational mode (VAE)
+    vae = VAE(latent_dim=128, variational=True)
     x = torch.rand(2, 3, 108, 192)
     recon, mu, logvar = vae(x)
     assert recon.shape == (2, 3, 108, 192)
     assert mu.shape == (2, 128)
-    assert logvar.shape == (2, 128)
+    assert logvar is not None and logvar.shape == (2, 128)
+
+    # 2. Deterministic mode (pure Autoencoder)
+    ae = VAE(latent_dim=128, variational=False)
+    recon_ae, mu_ae, logvar_ae = ae(x)
+    assert recon_ae.shape == (2, 3, 108, 192)
+    assert mu_ae.shape == (2, 128)
+    assert logvar_ae is None
 
 
 def test_vae_encode_get_latent_and_decode() -> None:
     """Test VAE encoding, deterministic latent extraction, and decoding."""
-    vae = VAE(latent_dim=64)
+    vae = VAE(latent_dim=64, variational=True)
     x = torch.rand(4, 3, 108, 192)
     mu, logvar = vae.encode(x)
     z = vae.get_latent(x)
@@ -42,16 +50,25 @@ def test_vae_encode_get_latent_and_decode() -> None:
 
 
 def test_vae_loss_computation() -> None:
-    """Test VAE combined loss calculation."""
+    """Test VAE combined loss calculation in variational and AE modes."""
     recon = torch.rand(2, 3, 108, 192)
     x = torch.rand(2, 3, 108, 192)
     mu = torch.randn(2, 128)
     logvar = torch.randn(2, 128)
 
-    total_loss, recon_loss, kl_loss = vae_loss(recon, x, mu, logvar, beta=0.001)
+    # Variational mode with KL
+    total_loss, logs = vae_loss(recon, x, mu, logvar, kl_weight=0.001)
     assert total_loss.item() > 0.0
-    assert recon_loss.item() > 0.0
-    assert not torch.isnan(kl_loss)
+    assert logs["recon"] > 0.0
+    assert logs["recon_l1"] > 0.0
+    assert logs["recon_mse"] > 0.0
+    assert logs["kl"] > 0.0
+
+    # Deterministic mode with latent L2
+    total_loss_ae, logs_ae = vae_loss(recon, x, mu, logvar=None, latent_l2=0.01)
+    assert total_loss_ae.item() > 0.0
+    assert logs_ae["kl"] == 0.0
+    assert logs_ae["latent_l2"] > 0.0
 
 
 class _SyntheticVideoDataset:

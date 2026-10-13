@@ -12,9 +12,11 @@ img_height: 108
 img_width: 192
 cache_path: ".cache/vae_dataset_cache_360_46v.npy"
 
-# VAE model architecture settings
+# Model architecture settings
 latent_dim: 512
+variational: true
 beta_kl: 0.0001
+latent_l2: 0.0
 
 # Optimization hyperparameters
 lr: 0.0001

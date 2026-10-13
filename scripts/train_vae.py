@@ -257,30 +257,71 @@ def plot_vae_loss_curves(history: Dict[str, List[float]], output_path: Path) -> 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
     ax1.plot(epochs, history["total_loss"], label="Total Loss", color="#1f77b4", lw=2)
-    ax1.plot(
-        epochs,
-        history["recon_mse"],
-        label="Reconstruction MSE",
-        color="#2ca02c",
-        lw=2,
-        linestyle="--",
-    )
+    if "recon" in history:
+        ax1.plot(
+            epochs,
+            history["recon"],
+            label="Reconstruction (L1+MSE)",
+            color="#2ca02c",
+            lw=2,
+            linestyle="--",
+        )
+    elif "recon_mse" in history:
+        ax1.plot(
+            epochs,
+            history["recon_mse"],
+            label="Reconstruction MSE",
+            color="#2ca02c",
+            lw=2,
+            linestyle="--",
+        )
     ax1.set_ylabel("Reconstruction Loss", fontsize=12)
     ax1.set_title(
-        "VAE Training Loss Progression (512-dim Latent)", fontsize=14, fontweight="bold"
+        "Autoencoder / VAE Training Loss Progression (512-dim Latent)",
+        fontsize=14,
+        fontweight="bold",
     )
     ax1.grid(True, alpha=0.3)
     ax1.legend(loc="upper right")
 
-    ax2.plot(
-        epochs,
-        history["kl_loss"],
-        label="KL Divergence (summed)",
-        color="#d62728",
-        lw=2,
-    )
+    has_kl = any(v > 0.0 for v in history.get("kl_loss", []))
+    if has_kl:
+        ax2.plot(
+            epochs,
+            history["kl_loss"],
+            label="KL Divergence (summed)",
+            color="#d62728",
+            lw=2,
+        )
+        ax2.set_ylabel("KL Loss", fontsize=12)
+    else:
+        if "recon_l1" in history:
+            ax2.plot(
+                epochs,
+                history["recon_l1"],
+                label="Recon L1",
+                color="#ff7f0e",
+                lw=2,
+            )
+        if "recon_mse" in history:
+            ax2.plot(
+                epochs,
+                history["recon_mse"],
+                label="Recon MSE",
+                color="#2ca02c",
+                lw=2,
+                linestyle="--",
+            )
+        if "latent_l2" in history and any(v > 0.0 for v in history["latent_l2"]):
+            ax2.plot(
+                epochs,
+                history["latent_l2"],
+                label="Latent L2",
+                color="#9467bd",
+                lw=2,
+            )
+        ax2.set_ylabel("Component Losses", fontsize=12)
     ax2.set_xlabel("Epoch", fontsize=12)
-    ax2.set_ylabel("KL Loss", fontsize=12)
     ax2.grid(True, alpha=0.3)
     ax2.legend(loc="upper right")
 
@@ -440,54 +481,92 @@ def main(cfg: DictConfig) -> None:
         shuffle=True,
     )
 
-    model = VAE(latent_dim=int(cfg.latent_dim)).to(device)
+    variational = bool(cfg.get("variational", False))
+    latent_l2 = float(cfg.get("latent_l2", 0.0))
+    model = VAE(
+        latent_dim=int(cfg.latent_dim),
+        variational=variational,
+    ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
 
-    print(f"Starting VAE training for {cfg.max_epochs} epochs on {device}...")
+    mode_name = (
+        "VAE (variational=True)" if variational else "Autoencoder (variational=False)"
+    )
+    print(f"Starting {mode_name} training for {cfg.max_epochs} epochs on {device}...")
     model.train()
 
     beta = float(cfg.beta_kl)
     history: Dict[str, List[float]] = {
         "epoch": [],
         "total_loss": [],
+        "recon": [],
+        "recon_l1": [],
         "recon_mse": [],
         "kl_loss": [],
+        "latent_l2": [],
     }
 
     for epoch in range(int(cfg.max_epochs)):
         total_loss_accum = 0.0
-        recon_loss_accum = 0.0
+        recon_accum = 0.0
+        recon_l1_accum = 0.0
+        recon_mse_accum = 0.0
         kl_loss_accum = 0.0
+        latent_l2_accum = 0.0
 
         for batch in loader:
             batch = batch.to(device)
             optimizer.zero_grad()
             recon, mu, logvar = model(batch)
-            loss, recon_loss, kl_loss = vae_loss(recon, batch, mu, logvar, beta=beta)
+            loss, logs = vae_loss(
+                recon=recon,
+                x=batch,
+                mu=mu,
+                logvar=logvar,
+                kl_weight=beta,
+                latent_l2=latent_l2,
+            )
             loss.backward()
             optimizer.step()
 
             total_loss_accum += loss.item()
-            recon_loss_accum += recon_loss.item()
-            kl_loss_accum += kl_loss.item()
+            recon_accum += logs["recon"]
+            recon_l1_accum += logs["recon_l1"]
+            recon_mse_accum += logs["recon_mse"]
+            kl_loss_accum += logs["kl"]
+            latent_l2_accum += logs["latent_l2"]
 
         n_batches = max(len(loader), 1)
         avg_total = total_loss_accum / n_batches
-        avg_recon = recon_loss_accum / n_batches
+        avg_recon = recon_accum / n_batches
+        avg_l1 = recon_l1_accum / n_batches
+        avg_mse = recon_mse_accum / n_batches
         avg_kl = kl_loss_accum / n_batches
+        avg_l2 = latent_l2_accum / n_batches
 
         history["epoch"].append(epoch + 1)
         history["total_loss"].append(avg_total)
-        history["recon_mse"].append(avg_recon)
+        history["recon"].append(avg_recon)
+        history["recon_l1"].append(avg_l1)
+        history["recon_mse"].append(avg_mse)
         history["kl_loss"].append(avg_kl)
+        history["latent_l2"].append(avg_l2)
 
         if (epoch + 1) % 5 == 0 or (epoch + 1) == int(cfg.max_epochs):
-            print(
-                f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - "
-                f"Loss: {avg_total:.6f} "
-                f"(Recon MSE: {avg_recon:.6f}, KL: {avg_kl:.6f})",
-                flush=True,
-            )
+            if variational:
+                print(
+                    f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - "
+                    f"Loss: {avg_total:.6f} "
+                    f"(Recon L1+MSE: {avg_recon:.6f}, KL: {avg_kl:.6f})",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Epoch {epoch + 1:3d}/{cfg.max_epochs} - "
+                    f"Loss: {avg_total:.6f} "
+                    f"(Recon: {avg_recon:.6f}, L1: {avg_l1:.6f}, MSE: {avg_mse:.6f})",
+                    flush=True,
+                )
 
     # 1. Save trained checkpoint
     out_path = ensure_writable_output_path(str(cfg.output_checkpoint))

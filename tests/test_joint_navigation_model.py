@@ -78,16 +78,21 @@ def test_joint_model_custom_initialization() -> None:
 def test_forward_reconstruction_shapes_and_values() -> None:
     """Test Branch 1: frame reconstruction and latent distribution outputs."""
     batch_size = 2
-    model = JointNavigationModel(
-        latent_dim=128, hidden_dim=64, num_blocks=2, block_inner_dim=64
+    # 1. Variational mode
+    model_vae = JointNavigationModel(
+        latent_dim=128,
+        hidden_dim=64,
+        num_blocks=2,
+        block_inner_dim=64,
+        variational=True,
     )
     x = torch.rand(batch_size, 3, 108, 192)
 
-    recon_x, mu, logvar = model.forward_reconstruction(x)
+    recon_x, mu, logvar = model_vae.forward_reconstruction(x)
 
     assert recon_x.shape == (batch_size, 3, 108, 192)
     assert mu.shape == (batch_size, 128)
-    assert logvar.shape == (batch_size, 128)
+    assert logvar is not None and logvar.shape == (batch_size, 128)
 
     # Sigmoid output in [0, 1]
     assert torch.all(recon_x >= 0.0)
@@ -95,6 +100,19 @@ def test_forward_reconstruction_shapes_and_values() -> None:
     assert torch.all(torch.isfinite(recon_x))
     assert torch.all(torch.isfinite(mu))
     assert torch.all(torch.isfinite(logvar))
+
+    # 2. Deterministic mode (pure Autoencoder)
+    model_ae = JointNavigationModel(
+        latent_dim=128,
+        hidden_dim=64,
+        num_blocks=2,
+        block_inner_dim=64,
+        variational=False,
+    )
+    recon_ae, mu_ae, logvar_ae = model_ae.forward_reconstruction(x)
+    assert recon_ae.shape == (batch_size, 3, 108, 192)
+    assert mu_ae.shape == (batch_size, 128)
+    assert logvar_ae is None
 
 
 def test_forward_translation_shapes_and_modes() -> None:
@@ -232,13 +250,17 @@ def test_convenience_methods() -> None:
     """Test encode, decode, and get_latent convenience delegation."""
     batch_size = 2
     model = JointNavigationModel(
-        latent_dim=128, hidden_dim=64, num_blocks=2, block_inner_dim=64
+        latent_dim=128,
+        hidden_dim=64,
+        num_blocks=2,
+        block_inner_dim=64,
+        variational=True,
     )
     x = torch.rand(batch_size, 3, 108, 192)
 
     mu, logvar = model.encode(x)
     assert mu.shape == (batch_size, 128)
-    assert logvar.shape == (batch_size, 128)
+    assert logvar is not None and logvar.shape == (batch_size, 128)
 
     mu_direct = model.get_latent(x)
     assert torch.equal(mu, mu_direct)
@@ -411,7 +433,11 @@ def test_gradient_flow_through_all_branches() -> None:
     """Test that backwards pass produces valid gradients across all parameter groups."""
     batch_size = 2
     model = JointNavigationModel(
-        latent_dim=64, hidden_dim=32, num_blocks=2, block_inner_dim=32
+        latent_dim=64,
+        hidden_dim=32,
+        num_blocks=2,
+        block_inner_dim=32,
+        variational=True,
     )
 
     x = torch.rand(batch_size, 3, 108, 192, requires_grad=True)
@@ -441,13 +467,13 @@ def test_gradient_flow_through_all_branches() -> None:
     # Forward transformer gradients
     for name, p in model.forward_transformer.named_parameters():
         assert p.grad is not None, f"Forward parameter {name} has no gradient."
-        assert not torch.isnan(p.grad).any(), (
-            f"Forward parameter {name} has NaN gradient."
-        )
+        assert not torch.isnan(
+            p.grad
+        ).any(), f"Forward parameter {name} has NaN gradient."
 
     # Rotation transformer gradients
     for name, p in model.rotation_transformer.named_parameters():
         assert p.grad is not None, f"Rotation parameter {name} has no gradient."
-        assert not torch.isnan(p.grad).any(), (
-            f"Rotation parameter {name} has NaN gradient."
-        )
+        assert not torch.isnan(
+            p.grad
+        ).any(), f"Rotation parameter {name} has NaN gradient."

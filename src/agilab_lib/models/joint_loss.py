@@ -759,6 +759,7 @@ class JointNavigationLoss(nn.Module):
         if has_recon:
             assert recon_x is not None and x_t is not None
             recon_mse = F.mse_loss(recon_x, x_t, reduction="mean")
+            recon_l1 = F.l1_loss(recon_x, x_t, reduction="mean")
             if self.alpha_perc > 0.0:
                 recon_perc = self.perceptual_loss(recon_x, x_t)
             else:
@@ -770,10 +771,14 @@ class JointNavigationLoss(nn.Module):
                 recon_kl = torch.zeros((), device=device, dtype=dtype)
 
             loss_recon = (
-                recon_mse + self.alpha_perc * recon_perc + self.beta_kl * recon_kl
+                recon_mse
+                + recon_l1
+                + self.alpha_perc * recon_perc
+                + self.beta_kl * recon_kl
             )
         else:
             recon_mse = torch.zeros((), device=device, dtype=dtype)
+            recon_l1 = torch.zeros((), device=device, dtype=dtype)
             recon_perc = torch.zeros((), device=device, dtype=dtype)
             recon_kl = torch.zeros((), device=device, dtype=dtype)
             loss_recon = torch.zeros((), device=device, dtype=dtype)
@@ -848,6 +853,7 @@ class JointNavigationLoss(nn.Module):
             "loss": total_loss,
             "loss_recon": loss_recon,
             "recon_mse": recon_mse,
+            "recon_l1": recon_l1,
             "recon_perc": recon_perc,
             "recon_kl": recon_kl,
             "loss_fwd": loss_fwd,

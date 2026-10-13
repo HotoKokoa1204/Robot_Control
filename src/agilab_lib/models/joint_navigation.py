@@ -44,6 +44,7 @@ class JointNavigationModel(nn.Module):
         vae: Optional[VAE] = None,
         forward_transformer: Optional[ForwardLatentTransformer] = None,
         rotation_transformer: Optional[RotationLatentTransformer] = None,
+        variational: bool = False,
     ) -> None:
         """Initialize the Joint Navigation Model architecture.
 
@@ -57,12 +58,15 @@ class JointNavigationModel(nn.Module):
             vae: Optional pre-instantiated VAE module.
             forward_transformer: Optional pre-instantiated ForwardLatentTransformer.
             rotation_transformer: Optional pre-instantiated RotationLatentTransformer.
+            variational: Whether shared VAE uses variational latent sampling.
+                Defaults to False.
         """
         super().__init__()
         self.latent_dim: int = latent_dim
         self.hidden_dim: int = hidden_dim
         self.num_blocks: int = num_blocks
         self.block_inner_dim: int = block_inner_dim
+        self.variational: bool = variational
 
         f_blocks = forward_num_blocks if forward_num_blocks is not None else num_blocks
         r_blocks = (
@@ -72,7 +76,7 @@ class JointNavigationModel(nn.Module):
         if vae is not None:
             self.vae: VAE = vae
         else:
-            self.vae = VAE(latent_dim=latent_dim)
+            self.vae = VAE(latent_dim=latent_dim, variational=variational)
 
         if forward_transformer is not None:
             self.forward_transformer: ForwardLatentTransformer = forward_transformer
