@@ -137,16 +137,16 @@ class RealVideoFramesDataset(Dataset[torch.Tensor]):
         return len(self.frames)
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-        """Fetch a single normalized frame tensor.
+        """Fetch a single frame tensor.
 
         Args:
             idx: Index of frame.
 
         Returns:
-            Normalized frame tensor of shape (3, H, W).
+            Frame tensor of shape (3, H, W) in uint8 format.
         """
         frame_np = self.frames[idx]
-        return torch.from_numpy(frame_np).float().permute(2, 0, 1) / 255.0
+        return torch.from_numpy(frame_np).permute(2, 0, 1)
 
 
 def discover_video_files(cfg: DictConfig) -> List[Path]:
@@ -479,6 +479,8 @@ def main(cfg: DictConfig) -> None:
         dataset,
         batch_size=int(cfg.batch_size),
         shuffle=True,
+        pin_memory=torch.cuda.is_available(),
+        num_workers=0,
     )
 
     variational = bool(cfg.get("variational", False))
@@ -488,6 +490,7 @@ def main(cfg: DictConfig) -> None:
         variational=variational,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr))
+    scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
     mode_name = (
         "VAE (variational=True)" if variational else "Autoencoder (variational=False)"
@@ -506,6 +509,11 @@ def main(cfg: DictConfig) -> None:
         "latent_l2": [],
     }
 
+    plots_dir = get_plots_dir()
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    out_path = ensure_writable_output_path(str(cfg.output_checkpoint))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
     for epoch in range(int(cfg.max_epochs)):
         total_loss_accum = 0.0
         recon_accum = 0.0
@@ -515,19 +523,23 @@ def main(cfg: DictConfig) -> None:
         latent_l2_accum = 0.0
 
         for batch in loader:
-            batch = batch.to(device)
+            batch = batch.to(device, non_blocking=True).float().div_(255.0)
             optimizer.zero_grad()
-            recon, mu, logvar = model(batch)
-            loss, logs = vae_loss(
-                recon=recon,
-                x=batch,
-                mu=mu,
-                logvar=logvar,
-                kl_weight=beta,
-                latent_l2=latent_l2,
-            )
-            loss.backward()
-            optimizer.step()
+            with torch.amp.autocast(
+                "cuda", enabled=device.type == "cuda", dtype=torch.float16
+            ):
+                recon, mu, logvar = model(batch)
+                loss, logs = vae_loss(
+                    recon=recon,
+                    x=batch,
+                    mu=mu,
+                    logvar=logvar,
+                    kl_weight=beta,
+                    latent_l2=latent_l2,
+                )
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             total_loss_accum += loss.item()
             recon_accum += logs["recon"]
@@ -568,15 +580,17 @@ def main(cfg: DictConfig) -> None:
                     flush=True,
                 )
 
-    # 1. Save trained checkpoint
-    out_path = ensure_writable_output_path(str(cfg.output_checkpoint))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+            # Periodic checkpoint and telemetry save
+            torch.save(model.state_dict(), out_path)
+            with open(plots_dir / "vae_history.json", "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2)
+            plot_vae_loss_curves(history, plots_dir / "vae_loss_curves.png")
+
+    # 1. Final checkpoint save confirmation
     torch.save(model.state_dict(), out_path)
     print(f"VAE checkpoint successfully saved to: {out_path}")
 
-    # 2. Save loss history JSON & plot curves
-    plots_dir = get_plots_dir()
-    plots_dir.mkdir(parents=True, exist_ok=True)
+    # 2. Final loss history JSON & plot curves
     history_path = plots_dir / "vae_history.json"
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)

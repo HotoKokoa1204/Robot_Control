@@ -21,7 +21,7 @@ latent_l2: 0.0
 # Optimization hyperparameters
 lr: 0.0001
 batch_size: 64
-max_epochs: 100
+max_epochs: 30
 
 # Output checkpoint path
 output_checkpoint: "checkpoints/vae.pt"
