@@ -202,6 +202,7 @@ def build_side_by_side_frame(
     original_bgr: np.ndarray,
     reconstructed_bgr: np.ndarray,
     scale: int = 2,
+    recon_label: str = "Reconstructed VAE",
 ) -> np.ndarray:
     """Builds a labeled side-by-side composite frame.
 
@@ -209,6 +210,7 @@ def build_side_by_side_frame(
         original_bgr: Original frame in BGR uint8 format (H, W, 3).
         reconstructed_bgr: Reconstructed frame in BGR uint8 format (H, W, 3).
         scale: Upscale factor for visualization clarity.
+        recon_label: Text label for the reconstructed frame.
 
     Returns:
         Horizontal composite frame of shape (H * scale, W * scale * 2, 3).
@@ -233,7 +235,7 @@ def build_side_by_side_frame(
     )
     cv2.putText(
         recon_scaled,
-        "Reconstructed VAE",
+        recon_label,
         (10, 25 * scale // 2),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.5 * scale,
@@ -337,6 +339,8 @@ def evaluate_visual_reconstruction(
     device: torch.device,
     img_width: int = 192,
     img_height: int = 108,
+    tag: str = "vae",
+    recon_label: str = "Reconstructed VAE",
 ) -> Tuple[Path, Path, float]:
     """Generates side-by-side reconstruction video and 9-panel image comparison.
 
@@ -346,6 +350,8 @@ def evaluate_visual_reconstruction(
         device: Torch execution device.
         img_width: Target image width.
         img_height: Target image height.
+        tag: Filename prefix tag ('vae' or 'ae').
+        recon_label: Visual label for reconstructed frames.
 
     Returns:
         Tuple of (video_output_path, panel_output_path, avg_std).
@@ -389,7 +395,7 @@ def evaluate_visual_reconstruction(
     # 1. Export Side-by-Side Video
     eval_dir = get_eval_dir()
     eval_dir.mkdir(parents=True, exist_ok=True)
-    video_out = eval_dir / "vae_recon_eval.mp4"
+    video_out = eval_dir / f"{tag}_recon_eval.mp4"
 
     scale = 2
     out_h = img_height * scale
@@ -398,13 +404,15 @@ def evaluate_visual_reconstruction(
     writer = cv2.VideoWriter(str(video_out), fourcc, 30.0, (out_w, out_h))
 
     for orig_bgr, recon_bgr in zip(orig_bgr_frames, recon_bgr_frames):
-        composite = build_side_by_side_frame(orig_bgr, recon_bgr, scale=scale)
+        composite = build_side_by_side_frame(
+            orig_bgr, recon_bgr, scale=scale, recon_label=recon_label
+        )
         writer.write(composite)
     writer.release()
     print(f"Evaluation reconstruction video saved to: {video_out}")
 
     # 2. Export 9-Frame Comparison Panel
-    panel_out = eval_dir / "vae_recon_comparison_panel.png"
+    panel_out = eval_dir / f"{tag}_recon_comparison_panel.png"
     n_total = len(orig_bgr_frames)
     if n_total >= 9:
         indices = np.linspace(0, n_total - 1, 9, dtype=int)
@@ -413,7 +421,7 @@ def evaluate_visual_reconstruction(
 
     fig, axes = plt.subplots(3, 3, figsize=(14, 10))
     fig.suptitle(
-        f"VAE Visual Reconstruction Samples (Avg Std: {avg_std:.2f})",
+        f"{recon_label} Samples (Avg Std: {avg_std:.2f})",
         fontsize=16,
         fontweight="bold",
     )
@@ -495,6 +503,8 @@ def main(cfg: DictConfig) -> None:
     mode_name = (
         "VAE (variational=True)" if variational else "Autoencoder (variational=False)"
     )
+    tag = "vae" if variational else "ae"
+    recon_label = "Reconstructed VAE" if variational else "Reconstructed AE"
     print(f"Starting {mode_name} training for {cfg.max_epochs} epochs on {device}...")
     model.train()
 
@@ -582,21 +592,21 @@ def main(cfg: DictConfig) -> None:
 
             # Periodic checkpoint and telemetry save
             torch.save(model.state_dict(), out_path)
-            with open(plots_dir / "vae_history.json", "w", encoding="utf-8") as f:
+            with open(plots_dir / f"{tag}_history.json", "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2)
-            plot_vae_loss_curves(history, plots_dir / "vae_loss_curves.png")
+            plot_vae_loss_curves(history, plots_dir / f"{tag}_loss_curves.png")
 
     # 1. Final checkpoint save confirmation
     torch.save(model.state_dict(), out_path)
-    print(f"VAE checkpoint successfully saved to: {out_path}")
+    print(f"{mode_name} checkpoint successfully saved to: {out_path}")
 
     # 2. Final loss history JSON & plot curves
-    history_path = plots_dir / "vae_history.json"
+    history_path = plots_dir / f"{tag}_history.json"
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
     print(f"Training history saved to: {history_path}")
 
-    plot_vae_loss_curves(history, plots_dir / "vae_loss_curves.png")
+    plot_vae_loss_curves(history, plots_dir / f"{tag}_loss_curves.png")
 
     # 3. Evaluate visual reconstruction on the first video
     if video_paths:
@@ -608,6 +618,8 @@ def main(cfg: DictConfig) -> None:
             device=device,
             img_width=int(cfg.img_width),
             img_height=int(cfg.img_height),
+            tag=tag,
+            recon_label=recon_label,
         )
 
         min_std = 15.0

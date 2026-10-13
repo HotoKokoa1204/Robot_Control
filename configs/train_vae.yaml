@@ -14,7 +14,7 @@ cache_path: ".cache/vae_dataset_cache_360_46v.npy"
 
 # Model architecture settings
 latent_dim: 512
-variational: true
+variational: false
 beta_kl: 0.0001
 latent_l2: 0.0
 
@@ -24,7 +24,7 @@ batch_size: 64
 max_epochs: 30
 
 # Output checkpoint path
-output_checkpoint: "checkpoints/vae.pt"
+output_checkpoint: "checkpoints/autoencoder.pt"
 
 # Hydra execution log confinement
 hydra:
