@@ -88,9 +88,9 @@ class VAE(nn.Module):
         self.pad_hw: Tuple[int, int] = pad_hw
 
         n = len(channels)
-        assert (
-            pad_hw[0] % (2**n) == 0 and pad_hw[1] % (2**n) == 0
-        ), f"pad_hw {pad_hw} must be divisible by 2^{n} = {2**n}"
+        assert pad_hw[0] % (2**n) == 0 and pad_hw[1] % (2**n) == 0, (
+            f"pad_hw {pad_hw} must be divisible by 2^{n} = {2**n}"
+        )
         self.feat_hw: Tuple[int, int] = (pad_hw[0] // (2**n), pad_hw[1] // (2**n))
         self.top_c: int = channels[-1]
         self.bn_c: int = bottleneck_channels
